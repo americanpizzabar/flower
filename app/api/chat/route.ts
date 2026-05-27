@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { chatWithCustomer } from "@/lib/claude";
+import { chatWithCustomer } from "@/lib/ai";
 import { getInventoryInStock, getInventoryByIds } from "@/lib/flowers";
 
 export const runtime = "nodejs";

@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { db } from "@vercel/postgres";
 import { currentSeason } from "@/lib/db";
-import { rankSuggestions } from "@/lib/claude";
+import { rankSuggestions } from "@/lib/ai";
 import type { InventoryItemWithFlower } from "@/lib/types";
 
 export const runtime = "nodejs";

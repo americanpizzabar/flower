@@ -1,14 +1,18 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import type { ChatResponse, InventoryItemWithFlower } from "./types";
 
-const MODEL = process.env.CLAUDE_MODEL || "claude-opus-4-7";
+const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
-let _client: Anthropic | null = null;
-function client(): Anthropic {
+let _client: GoogleGenAI | null = null;
+function client(): GoogleGenAI {
   if (_client) return _client;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) throw new Error("ANTHROPIC_API_KEY is not set");
-  _client = new Anthropic({ apiKey });
+  const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+  if (!apiKey) {
+    throw new Error(
+      "GEMINI_API_KEY is not set. Get one from https://aistudio.google.com/app/apikey",
+    );
+  }
+  _client = new GoogleGenAI({ apiKey });
   return _client;
 }
 
@@ -24,7 +28,7 @@ const SYSTEM_PROMPT = `あなたは多言語対応の花屋アシスタントで
 - 1〜3 個を上限に絞り込む
 - お客様への返答は丁寧で温かい言葉遣いに
 
-出力は必ず以下の JSON 形式のみで返してください (前後に文章を付けない):
+出力は必ず以下の JSON 形式のみで返してください:
 {
   "detected_language": "BCP-47",
   "language_name_ja": "日本語名 (例: 中国語(繁体))",
@@ -76,33 +80,28 @@ export async function chatWithCustomer(
           .map((h) => `${h.role === "customer" ? "お客様" : "店員"}: ${h.text}`)
           .join("\n");
 
-  const res = await client().messages.create({
+  const userText = [
+    inventoryBlock,
+    historyBlock,
+    `お客様の発話:\n${customerMessage}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+
+  const res = await client().models.generateContent({
     model: MODEL,
-    max_tokens: 1024,
-    system: [
-      { type: "text", text: SYSTEM_PROMPT },
-      {
-        type: "text",
-        text: inventoryBlock,
-        cache_control: { type: "ephemeral" },
-      },
-    ],
-    messages: [
-      {
-        role: "user",
-        content: [
-          ...(historyBlock ? [{ type: "text" as const, text: historyBlock }] : []),
-          { type: "text", text: `お客様の発話:\n${customerMessage}` },
-        ],
-      },
-    ],
+    contents: userText,
+    config: {
+      systemInstruction: SYSTEM_PROMPT,
+      responseMimeType: "application/json",
+      temperature: 0.7,
+      maxOutputTokens: 1024,
+    },
   });
 
-  const textBlock = res.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
-    throw new Error("Claude returned no text");
-  }
-  return parseJsonObject<ChatResponse>(textBlock.text);
+  const text = res.text;
+  if (!text) throw new Error("Gemini returned no text");
+  return parseJsonObject<ChatResponse>(text);
 }
 
 const SUGGEST_SYSTEM = `あなたは花屋の在庫から候補を絞り込むアシスタントです。
@@ -138,38 +137,32 @@ export async function rankSuggestions(
     };
   }
 
-  const res = await client().messages.create({
+  const userText = `条件: ${JSON.stringify(query)}\n\n候補:\n${inventorySummary(candidates)}`;
+
+  const res = await client().models.generateContent({
     model: MODEL,
-    max_tokens: 512,
-    system: [{ type: "text", text: SUGGEST_SYSTEM }],
-    messages: [
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text:
-              `条件: ${JSON.stringify(query)}\n\n` +
-              `候補:\n${inventorySummary(candidates)}`,
-          },
-        ],
-      },
-    ],
+    contents: userText,
+    config: {
+      systemInstruction: SUGGEST_SYSTEM,
+      responseMimeType: "application/json",
+      temperature: 0.5,
+      maxOutputTokens: 512,
+    },
   });
 
-  const textBlock = res.content.find((b) => b.type === "text");
-  if (!textBlock || textBlock.type !== "text") {
+  const text = res.text;
+  if (!text) {
     return {
       ordered_inventory_ids: candidates.map((c) => c.id),
       comment_ja: "AI からの応答を取得できませんでした。",
     };
   }
   try {
-    return parseJsonObject<SuggestRanking>(textBlock.text);
+    return parseJsonObject<SuggestRanking>(text);
   } catch {
     return {
       ordered_inventory_ids: candidates.map((c) => c.id),
-      comment_ja: textBlock.text.slice(0, 200),
+      comment_ja: text.slice(0, 200),
     };
   }
 }
