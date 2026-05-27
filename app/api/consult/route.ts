@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { AiError, consultSummary } from "@/lib/ai";
+import { AiError, consultChat } from "@/lib/ai";
+import type { ConsultTurn } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -7,11 +8,20 @@ export const maxDuration = 60;
 
 export async function POST(req: Request) {
   try {
-    const { text } = await req.json();
+    const { text, history, lang } = await req.json();
     if (!text || typeof text !== "string") {
       return NextResponse.json({ error: "テキストが空です" }, { status: 400 });
     }
-    const result = await consultSummary(text);
+    const safeHistory: ConsultTurn[] = Array.isArray(history)
+      ? history.filter(
+          (t: unknown): t is ConsultTurn =>
+            !!t &&
+            typeof t === "object" &&
+            (t as ConsultTurn).role !== undefined &&
+            typeof (t as ConsultTurn).text === "string",
+        )
+      : [];
+    const result = await consultChat(safeHistory, text, typeof lang === "string" ? lang : undefined);
     return NextResponse.json(result);
   } catch (e) {
     if (e instanceof AiError) {

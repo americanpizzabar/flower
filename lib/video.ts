@@ -14,9 +14,16 @@ interface MediaRecorderLike {
 }
 
 interface MediaRecorderCtor {
-  new (stream: MediaStream, options?: { mimeType?: string }): MediaRecorderLike;
+  new (
+    stream: MediaStream,
+    options?: { mimeType?: string; videoBitsPerSecond?: number; audioBitsPerSecond?: number },
+  ): MediaRecorderLike;
   isTypeSupported?: (mime: string) => boolean;
 }
+
+// Tuned to fit ~3MB for a 20-second clip — under Vercel's 4.5MB body limit.
+const VIDEO_BITS_PER_SECOND = 1_200_000;
+const AUDIO_BITS_PER_SECOND = 64_000;
 
 function pickMimeType(): string | undefined {
   if (typeof window === "undefined") return undefined;
@@ -140,7 +147,11 @@ export function useInAppCamera(): InAppCamera {
     setError("");
     const mimeType = pickMimeType();
     const MR = (window as unknown as { MediaRecorder: MediaRecorderCtor }).MediaRecorder;
-    const recorder = new MR(streamRef.current, mimeType ? { mimeType } : undefined);
+    const recorder = new MR(streamRef.current, {
+      ...(mimeType ? { mimeType } : {}),
+      videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+      audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+    });
     chunksRef.current = [];
 
     recorder.ondataavailable = (e) => {
@@ -246,6 +257,57 @@ export function useInAppCamera(): InAppCamera {
   };
 }
 
+/**
+ * Downscale large images and re-encode as JPEG so an in-store snapshot
+ * lands well under Vercel's 4.5MB body limit. Images that are already
+ * small (< 800KB and <= maxWidth) are returned unchanged.
+ */
+export async function compressImage(
+  file: File,
+  maxWidth = 1600,
+  quality = 0.8,
+): Promise<File> {
+  if (!file.type.startsWith("image/")) return file;
+  const img = await loadImage(file);
+  const tooBig = file.size > 800_000;
+  const tooWide = img.width > maxWidth;
+  if (!tooBig && !tooWide) {
+    img.remove?.();
+    return file;
+  }
+  const ratio = tooWide ? maxWidth / img.width : 1;
+  const w = Math.round(img.width * ratio);
+  const h = Math.round(img.height * ratio);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return file;
+  ctx.drawImage(img, 0, 0, w, h);
+  const blob: Blob | null = await new Promise((resolve) =>
+    canvas.toBlob((b) => resolve(b), "image/jpeg", quality),
+  );
+  if (!blob) return file;
+  const name = file.name.replace(/\.[^.]+$/, "") + ".jpg";
+  return new File([blob], name, { type: "image/jpeg" });
+}
+
+function loadImage(file: File): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      URL.revokeObjectURL(url);
+      resolve(img);
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error("画像を読み込めませんでした"));
+    };
+    img.src = url;
+  });
+}
+
 export function videoDuration(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
@@ -307,7 +369,11 @@ export async function trimVideo(file: File): Promise<File> {
     );
   }
 
-  const recorder = new MR(stream, { mimeType: mime });
+  const recorder = new MR(stream, {
+    mimeType: mime,
+    videoBitsPerSecond: VIDEO_BITS_PER_SECOND,
+    audioBitsPerSecond: AUDIO_BITS_PER_SECOND,
+  });
   const chunks: Blob[] = [];
   recorder.ondataavailable = (e) => {
     if (e.data && e.data.size > 0) chunks.push(e.data);

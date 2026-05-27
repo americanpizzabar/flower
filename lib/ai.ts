@@ -1,10 +1,12 @@
 import { GoogleGenAI } from "@google/genai";
 import type {
   ConsultResult,
+  ConsultTurn,
   InterpretResult,
   StoreIntroResult,
   VisualResult,
 } from "./types";
+import { CONSULT_SLOTS } from "./types";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
@@ -33,35 +35,70 @@ export class AiError extends Error {
   }
 }
 
+const SLOT_DESCRIPTIONS = CONSULT_SLOTS.map(
+  (s) => `  - ${s.key}: ${s.label_ja}${s.required ? " (必須)" : ""}`,
+).join("\n");
+
 const CONSULT_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
-お客様の発話 (どの言語でも) を受け取り、店員が日本語で花を見繕えるように要約します。
+お客様と何度かやり取りしながら、花を見繕うために必要な情報を集めます。
 
-手順:
-1. 発話の言語を自動検出 (BCP-47)
-2. 店員向けに丁寧に日本語要約。ニュアンス・贈る相手・関係性・場面も補足
-3. 検索しやすいキーワードを抽出
-4. 確認しておくと良い追加質問を 2〜3 個用意
-5. お客様への確認メッセージをお客様の言語で短く
+## 集めたい情報 (slots)
+${SLOT_DESCRIPTIONS}
 
-JSON のみで返答 (前後にテキストやコードフェンスを付けない):
+## あなたの仕事
+これまでの会話の履歴とお客様の最新の発話を受け取り、次を行う:
+1. お客様の発話の言語を自動検出 (BCP-47)
+2. 会話全体から各 slot に該当する情報を抽出し、累積した keywords を更新する (過去のターンで分かったことを引き継ぐ)
+3. filled_slots と missing_slots を計算する
+4. 必須 slot (recipient, occasion, budget) が全部埋まり、かつお客様が「もう十分」というニュアンスを示したら is_ready=true。それ以外は false
+5. is_ready が false なら、missing_slots の中で最も自然に次に聞ける項目を 1 つ選び、お客様の言語で短い質問 (next_question_to_customer) を作る
+   - 質問は 1 つだけ。たくさん聞かない
+   - 既に分かっている内容を踏まえて自然な会話の流れにする
+   - 必須項目を優先するが、文脈に応じて柔軟に
+6. is_ready が true なら next_question_to_customer は null
+7. reply_to_customer はお客様の言語で「ありがとうございます。〜について教えていただけますか？」のように、共感の一言 + 次の質問を組み合わせる (is_ready=true なら締めの一言)
+8. cumulative_summary_ja は店員向けに会話全体から分かったことを日本語で簡潔にまとめる
+9. staff_note_ja には、店員に補足したいニュアンスや注意点 (任意)
+
+## 出力
+JSON のみ (前後にテキストやコードフェンスを付けない):
 {
   "detected_language": "BCP-47",
   "language_name_ja": "日本語名",
-  "customer_text_original": "お客様の発話のまま",
-  "summary_ja": "店員向け要約",
+  "cumulative_summary_ja": "店員向け要約",
   "keywords": {
-    "color": [], "purpose": "", "recipient": "",
-    "budget": "", "flower_language": [],
-    "occasion": "", "style": "", "delivery": ""
+    "recipient": "...", "occasion": "...", "budget": "...",
+    "color": ["..."], "flower_language": ["..."],
+    "style": "...", "delivery": "...", "deadline": "..."
   },
-  "follow_up_questions_ja": ["..."],
-  "reply_to_customer": "お客様の言語で"
+  "filled_slots": ["recipient", "occasion"],
+  "missing_slots": ["budget", "color"],
+  "reply_to_customer": "お客様の言語で",
+  "next_question_to_customer": "お客様の言語で次に聞きたい質問 (is_ready=true なら null)",
+  "is_ready": false,
+  "staff_note_ja": "店員向けメモ (任意)"
 }`;
 
-export async function consultSummary(customerText: string): Promise<ConsultResult> {
+export async function consultChat(
+  history: ConsultTurn[],
+  customerText: string,
+  langHint?: string,
+): Promise<ConsultResult> {
+  const historyBlock =
+    history.length === 0
+      ? "これまでの会話: (まだなし)"
+      : "これまでの会話:\n" +
+        history
+          .map((h) => `${h.role === "customer" ? "お客様" : "アシスタント"}: ${h.text}`)
+          .join("\n");
+  const langBlock = langHint ? `お客様の言語(推定): ${langHint}` : "";
+  const payload = [langBlock, historyBlock, `お客様の最新の発話:\n${customerText}`]
+    .filter(Boolean)
+    .join("\n\n");
+
   return await callJson<ConsultResult>({
     system: CONSULT_SYSTEM,
-    contents: customerText,
+    contents: payload,
     maxOutputTokens: 4000,
     temperature: 0.5,
   });

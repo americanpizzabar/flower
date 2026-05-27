@@ -5,6 +5,7 @@ import styles from "./show.module.css";
 import { SUPPORTED_LANGS, type VisualResult } from "@/lib/types";
 import { useSpeechRecognition, speak } from "@/lib/speech";
 import {
+  compressImage,
   isInAppCameraSupported,
   MAX_VIDEO_SECONDS,
   trimVideo,
@@ -37,10 +38,11 @@ export default function ShowPage() {
   }, []);
 
   useEffect(() => {
-    camera.onCapture((file) => {
+    camera.onCapture(async (file) => {
       const kind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
-      const url = URL.createObjectURL(file);
-      setMedia((prev) => [...prev, { file, url, kind }]);
+      const finalFile = kind === "image" ? await compressImage(file).catch(() => file) : file;
+      const url = URL.createObjectURL(finalFile);
+      setMedia((prev) => [...prev, { file: finalFile, url, kind }]);
     });
   }, [camera]);
 
@@ -78,7 +80,8 @@ export default function ShowPage() {
         }
         next.push({ file: f, url: URL.createObjectURL(f), kind: "video" });
       } else {
-        next.push({ file: f, url: URL.createObjectURL(f), kind: "image" });
+        const compressed = await compressImage(f).catch(() => f);
+        next.push({ file: compressed, url: URL.createObjectURL(compressed), kind: "image" });
       }
     }
 
@@ -99,12 +102,38 @@ export default function ShowPage() {
     setLoading(true);
     setError("");
     try {
+      const totalBytes = media.reduce((s, m) => s + m.file.size, 0);
+      const totalMb = totalBytes / (1024 * 1024);
+      if (totalMb > 4) {
+        setError(
+          `添付の合計サイズが ${totalMb.toFixed(1)}MB です。サーバーの上限 (4MB) を超えるため、写真の枚数を減らすか、動画を短くしてください。`,
+        );
+        setLoading(false);
+        return;
+      }
+
       const form = new FormData();
       form.append("wish", wish);
       form.append("lang", lang);
       media.forEach((m) => form.append("media", m.file));
       const res = await fetch("/api/visual", { method: "POST", body: form });
-      const data = await res.json();
+
+      if (res.status === 413) {
+        throw new Error(
+          "サーバーの上限を超えています。写真の枚数を減らすか、動画を短くしてください。",
+        );
+      }
+
+      const ct = res.headers.get("content-type") || "";
+      let data: { error?: string } & VisualResult;
+      if (ct.includes("application/json")) {
+        data = await res.json();
+      } else {
+        const text = await res.text();
+        throw new Error(
+          `サーバーから予期しない応答が返りました (HTTP ${res.status}): ${text.slice(0, 120)}`,
+        );
+      }
       if (!res.ok) throw new Error(data.error || "失敗しました");
       setResult(data);
       camera.close();
