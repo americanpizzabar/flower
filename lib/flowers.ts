@@ -1,9 +1,14 @@
-import { sql, db } from "@vercel/postgres";
+import { pool } from "./db";
 import type { Flower, InventoryItemWithFlower } from "./types";
 
 export async function getAllFlowers(): Promise<Flower[]> {
-  const { rows } = await sql<Flower>`SELECT * FROM flowers ORDER BY id`;
-  return rows;
+  const client = await pool().connect();
+  try {
+    const r = await client.query<Flower>(`SELECT * FROM flowers ORDER BY id`);
+    return r.rows;
+  } finally {
+    client.release();
+  }
 }
 
 const INVENTORY_SELECT = `
@@ -16,7 +21,7 @@ const INVENTORY_SELECT = `
 `;
 
 export async function getInventoryInStock(): Promise<InventoryItemWithFlower[]> {
-  const client = await db.connect();
+  const client = await pool().connect();
   try {
     const r = await client.query(
       `${INVENTORY_SELECT} WHERE i.stock > 0 ORDER BY i.received_at DESC, i.id DESC`,
@@ -29,7 +34,7 @@ export async function getInventoryInStock(): Promise<InventoryItemWithFlower[]> 
 
 export async function getInventoryByIds(ids: number[]): Promise<InventoryItemWithFlower[]> {
   if (ids.length === 0) return [];
-  const client = await db.connect();
+  const client = await pool().connect();
   try {
     const r = await client.query(`${INVENTORY_SELECT} WHERE i.id = ANY($1::int[])`, [ids]);
     return r.rows as InventoryItemWithFlower[];

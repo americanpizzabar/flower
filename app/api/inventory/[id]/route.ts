@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@vercel/postgres";
+import { pool } from "@/lib/db";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -24,7 +24,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
   sets.push(`updated_at = now()`);
   vals.push(Number(id));
 
-  const client = await db.connect();
+  const client = await pool().connect();
   try {
     const r = await client.query(
       `UPDATE inventory SET ${sets.join(", ")} WHERE id = $${idx} RETURNING *`,
@@ -39,7 +39,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ id: st
 
 export async function DELETE(_req: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const client = await db.connect();
+  const client = await pool().connect();
   try {
     const r = await client.query(`DELETE FROM inventory WHERE id = $1`, [Number(id)]);
     return NextResponse.json({ deleted: r.rowCount });

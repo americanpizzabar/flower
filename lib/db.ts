@@ -1,6 +1,31 @@
-import { sql } from "@vercel/postgres";
+import { Pool, neon, neonConfig } from "@neondatabase/serverless";
 
-export { sql };
+neonConfig.fetchConnectionCache = true;
+
+function connectionString(): string {
+  const cs =
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.POSTGRES_URL_NON_POOLING;
+  if (!cs) {
+    throw new Error(
+      "DATABASE_URL (or POSTGRES_URL) is not set. Add a Postgres database in Vercel Storage tab, or set the connection string locally.",
+    );
+  }
+  return cs;
+}
+
+let _pool: Pool | null = null;
+export function pool(): Pool {
+  if (!_pool) _pool = new Pool({ connectionString: connectionString() });
+  return _pool;
+}
+
+let _sql: ReturnType<typeof neon> | null = null;
+export function sql(): ReturnType<typeof neon> {
+  if (!_sql) _sql = neon(connectionString());
+  return _sql;
+}
 
 export function currentSeason(date = new Date()): "spring" | "early_summer" | "summer" | "autumn" | "winter" {
   const m = date.getMonth() + 1;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@vercel/postgres";
+import { pool } from "@/lib/db";
 import { getInventoryInStock } from "@/lib/flowers";
 
 export const runtime = "nodejs";
@@ -9,7 +9,7 @@ export async function GET(req: Request) {
   const url = new URL(req.url);
   const filter = url.searchParams.get("filter"); // "today" | "in_stock" | "seasonal" | null
 
-  const client = await db.connect();
+  const client = await pool().connect();
   try {
     if (filter === "today") {
       const r = await client.query(
@@ -51,7 +51,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "flower_id is required" }, { status: 400 });
   }
 
-  const client = await db.connect();
+  const client = await pool().connect();
   try {
     const r = await client.query(
       `INSERT INTO inventory (flower_id, color, stock, received_at, price, photo_url, note)

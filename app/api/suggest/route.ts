@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@vercel/postgres";
-import { currentSeason } from "@/lib/db";
+import { pool, currentSeason } from "@/lib/db";
 import { rankSuggestions } from "@/lib/ai";
 import type { InventoryItemWithFlower } from "@/lib/types";
 
@@ -8,7 +7,7 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export async function POST(req: Request) {
-  const client = await db.connect();
+  const client = await pool().connect();
   try {
     const body = await req.json();
     const month: number | undefined = body.month;

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { db } from "@vercel/postgres";
+import { pool } from "@/lib/db";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -30,7 +30,7 @@ export async function POST(req: Request) {
   const seedRaw = await readFile(seedPath, "utf-8");
   const flowers: SeedFlower[] = JSON.parse(seedRaw);
 
-  const client = await db.connect();
+  const client = await pool().connect();
   try {
     // Run each schema statement individually
     for (const stmt of schema.split(";").map((s) => s.trim()).filter(Boolean)) {

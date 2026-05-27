@@ -11,7 +11,7 @@
 ## 技術スタック
 
 - Next.js 15 (App Router) + TypeScript
-- Vercel Postgres (`@vercel/postgres`)
+- Neon Postgres (`@neondatabase/serverless`) — Vercel Storage の Marketplace から1クリックで追加可能
 - Vercel Blob (`@vercel/blob`) — 花の写真
 - Google AI Studio / Gemini API (`@google/genai`, デフォルトは `gemini-2.5-flash`) — 言語検出・翻訳・花の提案
 
@@ -48,14 +48,15 @@ curl -X POST "http://localhost:3000/api/seed?secret=$SEED_SECRET"
 ## Vercel デプロイ
 
 1. このリポジトリを Vercel に Import
-2. **Storage** タブで以下を追加 (環境変数は自動注入される):
-   - **Postgres**
-   - **Blob**
+2. プロジェクト → **Storage** タブで以下を追加 (環境変数は自動注入される):
+   - **Neon (Postgres)** — Vercel Marketplace から選択。`DATABASE_URL` が自動で入る
+   - **Blob** — `BLOB_READ_WRITE_TOKEN` が自動で入る
 3. **Settings → Environment Variables** で以下を追加:
    - `GEMINI_API_KEY` — Google AI Studio (https://aistudio.google.com/app/apikey) で発行
    - `SEED_SECRET` — `/api/seed` への簡易ガード (任意)
    - `GEMINI_MODEL` — モデル指定 (任意、既定: `gemini-2.5-flash`。高品質優先なら `gemini-2.5-pro`)
-4. デプロイ後、`POST https://<your-app>.vercel.app/api/seed?secret=...` を一度実行
+4. 環境変数を追加したら **Deployments → 最新のデプロイ → Redeploy** で反映
+5. デプロイ後、`POST https://<your-app>.vercel.app/api/seed?secret=...` を一度実行してテーブル作成 + 花マスタ投入
 
 ## ディレクトリ
 
