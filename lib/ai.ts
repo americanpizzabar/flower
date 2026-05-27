@@ -194,104 +194,190 @@ interface CallArgs {
 }
 
 async function callJson<T>(args: CallArgs): Promise<T> {
-  let res;
-  try {
-    res = await client().models.generateContent({
-      model: MODEL,
-      // The SDK accepts string | Content[] | Content; we pass unknown to keep this helper generic.
-      contents: args.contents as Parameters<
-        ReturnType<typeof client>["models"]["generateContent"]
-      >[0]["contents"],
-      config: {
-        systemInstruction: args.system,
-        responseMimeType: "application/json",
-        temperature: args.temperature,
-        maxOutputTokens: args.maxOutputTokens,
-      },
-    });
-  } catch (e) {
-    throw translateSdkError(e);
-  }
+  const MAX_ATTEMPTS = 3;
+  const backoffMs = [0, 1500, 3500];
 
-  const finishReason =
-    (res as unknown as { candidates?: { finishReason?: string }[] }).candidates?.[0]
-      ?.finishReason || "";
+  let lastError: AiError | null = null;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    if (attempt > 0) await sleep(backoffMs[attempt]);
 
-  const text = res.text;
+    let res;
+    try {
+      res = await client().models.generateContent({
+        model: MODEL,
+        // The SDK accepts string | Content[] | Content; we pass unknown to keep this helper generic.
+        contents: args.contents as Parameters<
+          ReturnType<typeof client>["models"]["generateContent"]
+        >[0]["contents"],
+        config: {
+          systemInstruction: args.system,
+          responseMimeType: "application/json",
+          temperature: args.temperature,
+          maxOutputTokens: args.maxOutputTokens,
+        },
+      });
+    } catch (e) {
+      const err = translateSdkError(e);
+      lastError = err;
+      if (isRetryable(err.code) && attempt < MAX_ATTEMPTS - 1) {
+        continue;
+      }
+      throw err;
+    }
 
-  if (!text || text.trim() === "") {
-    if (finishReason === "SAFETY") {
+    const finishReason =
+      (res as unknown as { candidates?: { finishReason?: string }[] }).candidates?.[0]
+        ?.finishReason || "";
+
+    const text = res.text;
+
+    if (!text || text.trim() === "") {
+      if (finishReason === "SAFETY") {
+        throw new AiError(
+          "AI が安全上の理由で応答をブロックしました。表現を変えて再度お試しください。",
+          { code: "safety" },
+        );
+      }
+      if (finishReason === "MAX_TOKENS") {
+        throw new AiError(
+          "AI の応答が長すぎて途中で切れました。入力を短くして再度お試しください。",
+          { code: "max_tokens" },
+        );
+      }
       throw new AiError(
-        "AI が安全上の理由で応答をブロックしました。表現を変えて再度お試しください。",
-        { code: "safety" },
+        `AI からの応答が空でした (finishReason: ${finishReason || "unknown"})。モデル名 (${MODEL}) や API キーの権限をご確認ください。`,
+        { code: "empty_response" },
       );
     }
-    if (finishReason === "MAX_TOKENS") {
-      throw new AiError(
-        "AI の応答が長すぎて途中で切れました。入力を短くして再度お試しください。",
-        { code: "max_tokens" },
-      );
-    }
-    throw new AiError(
-      `AI からの応答が空でした (finishReason: ${finishReason || "unknown"})。モデル名 (${MODEL}) や API キーの権限をご確認ください。`,
-      { code: "empty_response" },
-    );
-  }
 
-  try {
-    return parseJsonObject<T>(text);
-  } catch {
-    if (finishReason === "MAX_TOKENS") {
+    try {
+      return parseJsonObject<T>(text);
+    } catch {
+      if (finishReason === "MAX_TOKENS") {
+        throw new AiError(
+          "AI の応答が長すぎて JSON が途中で切れました。入力を短くするか、対応言語を減らしてみてください。",
+          { code: "max_tokens" },
+        );
+      }
       throw new AiError(
-        "AI の応答が長すぎて JSON が途中で切れました。入力を短くするか、対応言語を減らしてみてください。",
-        { code: "max_tokens" },
+        "AI の応答を解析できませんでした。もう一度お試しください。",
+        { code: "parse_failed" },
       );
     }
-    throw new AiError(
-      "AI の応答を解析できませんでした。もう一度お試しください。",
-      { code: "parse_failed" },
-    );
   }
+  // Should be unreachable since the loop either returns or throws
+  throw lastError ?? new AiError("AI 呼び出しに失敗しました", { code: "unknown" });
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+function isRetryable(code: string): boolean {
+  return code === "overloaded" || code === "rate_limit" || code === "server_error";
 }
 
 function translateSdkError(e: unknown): AiError {
   if (e instanceof AiError) return e;
-  const msg = e instanceof Error ? e.message : String(e);
-  const status = extractStatus(msg);
+  const rawMsg = extractMessage(e);
+  const status = extractStatus(rawMsg);
+  const apiStatus = extractApiStatus(rawMsg);
+  const apiMsg = extractApiMessage(rawMsg);
+  const displayMsg = apiMsg || rawMsg.slice(0, 200);
 
-  if (status === 401 || status === 403 || /API key|permission/i.test(msg)) {
+  // 503 UNAVAILABLE — モデルが混雑している (Gemini で一番よく出る)
+  if (
+    status === 503 ||
+    apiStatus === "UNAVAILABLE" ||
+    /unavailable|overload|high demand|currently experiencing/i.test(rawMsg)
+  ) {
+    return new AiError(
+      `AI モデル (${MODEL}) が現在混雑しています。少し時間を置いてもう一度お試しください。\n何度も発生する場合は、環境変数 GEMINI_MODEL を gemini-2.5-flash-lite や gemini-2.0-flash に変えると改善する可能性があります。`,
+      { code: "overloaded", status: 503 },
+    );
+  }
+  if (
+    status === 429 ||
+    apiStatus === "RESOURCE_EXHAUSTED" ||
+    /quota|rate limit|too many requests/i.test(rawMsg)
+  ) {
+    return new AiError(
+      "Gemini API の利用上限 (1分間のリクエスト数や1日の上限) に達しました。少し時間を置いて再度お試しください。",
+      { code: "rate_limit", status: 429 },
+    );
+  }
+  if (status === 401 || status === 403 || /API key|permission denied/i.test(rawMsg)) {
     return new AiError(
       "Gemini API キーが無効、または権限がありません。Google AI Studio で新しいキーを発行して再設定してください。",
       { code: "auth", status },
     );
   }
-  if (status === 404 || /not found|does not exist/i.test(msg)) {
+  if (status === 404 || apiStatus === "NOT_FOUND" || /not found|does not exist/i.test(rawMsg)) {
     return new AiError(
-      `モデル「${MODEL}」が見つかりません。環境変数 GEMINI_MODEL を確認してください (例: gemini-2.5-flash, gemini-2.5-pro)。`,
+      `モデル「${MODEL}」が見つかりません。環境変数 GEMINI_MODEL を確認してください (例: gemini-2.5-flash, gemini-2.5-pro, gemini-2.0-flash)。`,
       { code: "model_not_found", status },
     );
   }
-  if (status === 429 || /quota|rate/i.test(msg)) {
+  if (
+    status === 500 ||
+    status === 502 ||
+    status === 504 ||
+    apiStatus === "INTERNAL" ||
+    apiStatus === "DEADLINE_EXCEEDED"
+  ) {
     return new AiError(
-      "Gemini API の利用上限に達しました。少し時間を置いて再度お試しください。",
-      { code: "rate_limit", status },
+      "AI サービスが一時的に不安定です。少し時間を置いて再度お試しください。",
+      { code: "server_error", status },
     );
   }
-  if (status === 400 || /invalid|bad request/i.test(msg)) {
-    return new AiError(
-      `リクエストが Gemini に拒否されました: ${msg.slice(0, 200)}`,
-      { code: "bad_request", status },
-    );
+  if (status === 400 || apiStatus === "INVALID_ARGUMENT") {
+    return new AiError(`リクエストが Gemini に拒否されました: ${displayMsg}`, {
+      code: "bad_request",
+      status,
+    });
   }
-  return new AiError(`AI サービスでエラーが発生しました: ${msg.slice(0, 200)}`, {
+  return new AiError(`AI サービスでエラーが発生しました: ${displayMsg}`, {
     code: "sdk_error",
     status,
   });
 }
 
+function extractMessage(e: unknown): string {
+  if (e instanceof Error) return e.message;
+  if (typeof e === "string") return e;
+  try {
+    return JSON.stringify(e);
+  } catch {
+    return String(e);
+  }
+}
+
 function extractStatus(msg: string): number | undefined {
+  // First try a structured JSON code field, e.g. {"error":{"code":503,...}}
+  const fromJsonCode = msg.match(/"code"\s*:\s*(\d{3})/);
+  if (fromJsonCode) return Number(fromJsonCode[1]);
   const m = msg.match(/\b(4\d{2}|5\d{2})\b/);
   return m ? Number(m[1]) : undefined;
+}
+
+function extractApiStatus(msg: string): string | undefined {
+  // {"status":"UNAVAILABLE"} or "status": "RESOURCE_EXHAUSTED"
+  const m = msg.match(/"status"\s*:\s*"([A-Z_]+)"/);
+  return m ? m[1] : undefined;
+}
+
+function extractApiMessage(msg: string): string | undefined {
+  // Try parsing as JSON first
+  try {
+    const obj = JSON.parse(msg) as { error?: { message?: string } };
+    if (obj?.error?.message) return obj.error.message;
+  } catch {
+    /* not JSON, fall through */
+  }
+  // Regex extract of "message":"..."
+  const m = msg.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+  if (m) return m[1].replace(/\\"/g, '"').replace(/\\n/g, "\n");
+  return undefined;
 }
 
 function parseJsonObject<T>(text: string): T {
