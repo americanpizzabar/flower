@@ -1,39 +1,49 @@
 import Link from "next/link";
 import styles from "./page.module.css";
 
+const TOOLS = [
+  {
+    href: "/consult",
+    emoji: "🎨",
+    title: "イメージで提案",
+    desc: "お客様に話したり書いてもらった希望を、日本語に要約。店員さんが店内の花を見繕えるようにします。",
+  },
+  {
+    href: "/show",
+    emoji: "📸",
+    title: "花を撮って見せる",
+    desc: "お客様の希望を聞いた上で、店内の花をスマホで撮影。AI がお客様の言語で説明します。",
+  },
+  {
+    href: "/interpret",
+    emoji: "🗣️",
+    title: "通訳モード",
+    desc: "店員さんとお客様の言葉をリアルタイムに通訳。音声入力・読み上げにも対応します。",
+  },
+  {
+    href: "/welcome",
+    emoji: "🏪",
+    title: "店舗紹介",
+    desc: "お店の URL を入れるだけで、多言語の店舗紹介を自動生成。観光客の最初の一歩に。",
+  },
+];
+
 export default function HomePage() {
   return (
     <div>
       <h1 className={styles.hero}>🌸 ようこそ、Hanakotoba へ</h1>
       <p className={styles.lead}>
-        外国人のお客様にも、その日の在庫から最適な一輪をご提案します。
+        4つの営業ツールで、世界中のお客様と花でつながります。
       </p>
 
       <div className={styles.cards}>
-        <Link href="/chat" className={styles.card}>
-          <div className={styles.emoji}>💬</div>
-          <h2>接客チャット</h2>
-          <p>
-            お客様にタブレットを向けて、母国語で会話。AI
-            がお客様の言葉を自動で見極め、店員さんには日本語で意図をお伝えします。
-          </p>
-        </Link>
-
-        <Link href="/suggest" className={styles.card}>
-          <div className={styles.emoji}>🎂</div>
-          <h2>花を提案</h2>
-          <p>
-            誕生日や花言葉、色、ご予算から、現在の在庫の中で最適な花を絞り込みます。
-          </p>
-        </Link>
-
-        <Link href="/inventory" className={styles.card}>
-          <div className={styles.emoji}>📦</div>
-          <h2>在庫管理</h2>
-          <p>
-            本日の入荷を写真付きで登録。在庫数や価格、色を一覧で管理できます。
-          </p>
-        </Link>
+        {TOOLS.map((t) => (
+          <Link key={t.href} href={t.href} className={styles.card}>
+            <div className={styles.emoji}>{t.emoji}</div>
+            <h2>{t.title}</h2>
+            <p>{t.desc}</p>
+          </Link>
+        ))}
       </div>
     </div>
   );

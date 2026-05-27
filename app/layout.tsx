@@ -4,7 +4,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Hanakotoba — 多言語花屋アシスタント",
-  description: "外国人のお客様にも、その日の在庫から最適な一輪を。",
+  description: "外国人のお客様にも、その日の花でぴったりの一輪を。",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
@@ -16,9 +16,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="brand">
               🌸 Hanakotoba
             </Link>
-            <Link href="/chat">接客チャット</Link>
-            <Link href="/suggest">花を提案</Link>
-            <Link href="/inventory">在庫管理</Link>
+            <Link href="/consult">イメージで提案</Link>
+            <Link href="/show">花を見せる</Link>
+            <Link href="/interpret">通訳</Link>
+            <Link href="/welcome">店舗紹介</Link>
           </nav>
         </header>
         <main>{children}</main>

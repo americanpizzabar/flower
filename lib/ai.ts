@@ -1,5 +1,10 @@
 import { GoogleGenAI } from "@google/genai";
-import type { ChatResponse, InventoryItemWithFlower } from "./types";
+import type {
+  ConsultResult,
+  InterpretResult,
+  StoreIntroResult,
+  VisualResult,
+} from "./types";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
@@ -16,155 +21,186 @@ function client(): GoogleGenAI {
   return _client;
 }
 
-const SYSTEM_PROMPT = `あなたは多言語対応の花屋アシスタントです。
-あなたの仕事は3つです:
-1. お客様が話している言語を自動検出する (BCP-47 形式、例: ja, en, zh-Hans, zh-Hant, ko, es, fr, de)
-2. お客様の意図を日本語で店員に伝える (ニュアンスや贈る相手の関係性も補足)
-3. 提示された在庫の中から、お客様の希望・花言葉・誕生花・季節・国際的な慣習に最も合う花を選び、お客様の言語で短い案内文を作る
+const CONSULT_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
+お客様の発話 (どの言語でも) を受け取り、店員が日本語で花を見繕えるように要約します。
 
-重要な制約:
-- 必ず提示された在庫の中の inventory_id からのみ選ぶ (在庫にない花を勧めない)
-- 文化的タブーに配慮する (例: フランス・イタリアで菊は葬儀の花、白い花は弔事を連想する文化もある)
-- 1〜3 個を上限に絞り込む
-- お客様への返答は丁寧で温かい言葉遣いに
+手順:
+1. 発話の言語を自動検出 (BCP-47)
+2. 店員向けに丁寧に日本語要約。ニュアンス・贈る相手・関係性・場面も補足
+3. 検索しやすいキーワードを抽出
+4. 確認しておくと良い追加質問を 2〜3 個用意
+5. お客様への確認メッセージをお客様の言語で短く
 
-出力は必ず以下の JSON 形式のみで返してください:
+JSON のみで返答:
 {
   "detected_language": "BCP-47",
-  "language_name_ja": "日本語名 (例: 中国語(繁体))",
-  "translated_for_staff_ja": "店員向け日本語訳と補足",
-  "reply_to_customer": "お客様の言語での返答",
-  "suggested_inventory_ids": [整数の配列],
-  "reason_ja": "なぜこれを選んだか (店員向け、簡潔に)"
-}`;
-
-function inventorySummary(inv: InventoryItemWithFlower[]): string {
-  if (inv.length === 0) return "(現在、在庫はありません)";
-  return inv
-    .map((i) => {
-      const meaningsJa = i.flower.meanings.ja?.join("・") || "";
-      const meaningsEn = i.flower.meanings.en?.join(", ") || "";
-      const birth = (i.flower.birth_days || [])
-        .map((b) => `${b.month}/${b.day}`)
-        .join(",");
-      const seasons = (i.flower.seasons || []).join(",");
-      return [
-        `- inventory_id=${i.id}`,
-        `  花: ${i.flower.names.ja} (${i.flower.names.en})`,
-        `  色: ${i.color || i.flower.default_color || "不明"}`,
-        `  在庫: ${i.stock}本`,
-        `  価格: ${i.price ? `¥${i.price}/本` : "未設定"}`,
-        `  花言葉(ja): ${meaningsJa}`,
-        `  meanings(en): ${meaningsEn}`,
-        `  誕生花: ${birth || "なし"}`,
-        `  旬: ${seasons || "通年"}`,
-        i.flower.notes ? `  備考: ${i.flower.notes}` : "",
-      ]
-        .filter(Boolean)
-        .join("\n");
-    })
-    .join("\n");
-}
-
-export async function chatWithCustomer(
-  customerMessage: string,
-  history: { role: "customer" | "staff"; text: string }[],
-  inventory: InventoryItemWithFlower[],
-): Promise<ChatResponse> {
-  const inventoryBlock = `現在の在庫一覧:\n${inventorySummary(inventory)}`;
-  const historyBlock =
-    history.length === 0
-      ? ""
-      : "これまでの会話:\n" +
-        history
-          .map((h) => `${h.role === "customer" ? "お客様" : "店員"}: ${h.text}`)
-          .join("\n");
-
-  const userText = [
-    inventoryBlock,
-    historyBlock,
-    `お客様の発話:\n${customerMessage}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const res = await client().models.generateContent({
-    model: MODEL,
-    contents: userText,
-    config: {
-      systemInstruction: SYSTEM_PROMPT,
-      responseMimeType: "application/json",
-      temperature: 0.7,
-      maxOutputTokens: 1024,
-    },
-  });
-
-  const text = res.text;
-  if (!text) throw new Error("Gemini returned no text");
-  return parseJsonObject<ChatResponse>(text);
-}
-
-const SUGGEST_SYSTEM = `あなたは花屋の在庫から候補を絞り込むアシスタントです。
-事前に SQL で絞り込まれた候補の中から、お客様の希望に最もよく合う順に並べ替え、日本語で短い説明を付けてください。
-出力は次の JSON のみ:
-{
-  "ordered_inventory_ids": [整数の配列, 関連度の高い順],
-  "comment_ja": "店員向けの一言コメント (なぜこの順か)"
-}`;
-
-export interface SuggestRanking {
-  ordered_inventory_ids: number[];
-  comment_ja: string;
-}
-
-export async function rankSuggestions(
-  query: {
-    birthday?: { month: number; day: number };
-    keyword?: string;
-    color?: string;
-    budget?: number;
-    preferSeasonal?: boolean;
+  "language_name_ja": "日本語名",
+  "customer_text_original": "お客様の発話のまま",
+  "summary_ja": "店員向け要約",
+  "keywords": {
+    "color": [], "purpose": "", "recipient": "",
+    "budget": "", "flower_language": [],
+    "occasion": "", "style": "", "delivery": ""
   },
-  candidates: InventoryItemWithFlower[],
-): Promise<SuggestRanking> {
-  if (candidates.length === 0) {
-    return { ordered_inventory_ids: [], comment_ja: "在庫に該当する花がありませんでした。" };
-  }
-  if (candidates.length === 1) {
-    return {
-      ordered_inventory_ids: [candidates[0].id],
-      comment_ja: "該当する花は1種類のみです。",
-    };
-  }
+  "follow_up_questions_ja": ["..."],
+  "reply_to_customer": "お客様の言語で"
+}`;
 
-  const userText = `条件: ${JSON.stringify(query)}\n\n候補:\n${inventorySummary(candidates)}`;
-
+export async function consultSummary(customerText: string): Promise<ConsultResult> {
   const res = await client().models.generateContent({
     model: MODEL,
-    contents: userText,
+    contents: customerText,
     config: {
-      systemInstruction: SUGGEST_SYSTEM,
+      systemInstruction: CONSULT_SYSTEM,
       responseMimeType: "application/json",
       temperature: 0.5,
-      maxOutputTokens: 512,
+      maxOutputTokens: 1200,
     },
   });
-
   const text = res.text;
-  if (!text) {
-    return {
-      ordered_inventory_ids: candidates.map((c) => c.id),
-      comment_ja: "AI からの応答を取得できませんでした。",
-    };
-  }
-  try {
-    return parseJsonObject<SuggestRanking>(text);
-  } catch {
-    return {
-      ordered_inventory_ids: candidates.map((c) => c.id),
-      comment_ja: text.slice(0, 200),
-    };
-  }
+  if (!text) throw new Error("Gemini returned no text");
+  return parseJsonObject<ConsultResult>(text);
+}
+
+const VISUAL_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
+店員が撮影した店内の花の写真 (または短い動画) と、お客様の希望テキストを受け取ります。
+
+手順:
+1. 画像/動画に写っている花を観察 (種類、色、本数の目安、雰囲気)
+2. お客様の希望と照らし合わせ、合致度・代案を判断
+3. お客様の言語で「これは○○の花で、〜〜のイメージにぴったりです」のような案内を作る
+4. 店員向けに日本語で何が写っているか・どう案内したかを補足
+5. お客様に対して次の質問を投げかける (気に入ったか、別のも見たいか等)
+
+JSON のみで返答:
+{
+  "detected_language": "BCP-47",
+  "language_name_ja": "日本語名",
+  "what_we_see_ja": "画像/動画に写っているもの (店員向け日本語)",
+  "description_for_customer": "お客様の言語での説明",
+  "match_assessment_ja": "希望との合致度・代案 (店員向け)",
+  "follow_up_to_customer": "お客様の言語での次の問いかけ"
+}`;
+
+export interface MediaPart {
+  base64: string;
+  mimeType: string;
+}
+
+export async function visualConsult(
+  customerWish: string,
+  customerLangHint: string | undefined,
+  media: MediaPart[],
+): Promise<VisualResult> {
+  const userText = customerLangHint
+    ? `お客様の言語: ${customerLangHint}\nお客様の希望:\n${customerWish}`
+    : `お客様の希望:\n${customerWish}`;
+
+  const parts = [
+    { text: userText },
+    ...media.map((m) => ({ inlineData: { mimeType: m.mimeType, data: m.base64 } })),
+  ];
+
+  const res = await client().models.generateContent({
+    model: MODEL,
+    contents: [{ role: "user", parts }],
+    config: {
+      systemInstruction: VISUAL_SYSTEM,
+      responseMimeType: "application/json",
+      temperature: 0.6,
+      maxOutputTokens: 1200,
+    },
+  });
+  const text = res.text;
+  if (!text) throw new Error("Gemini returned no text");
+  return parseJsonObject<VisualResult>(text);
+}
+
+const INTERPRET_SYSTEM = `あなたは花屋の接客で使われる通訳アシスタントです。
+入力テキストを指定された方向に翻訳します。お客様向けには丁寧で温かい言葉遣いに。
+
+入力情報:
+- source_hint: 入力テキストの言語ヒント ("ja" or "auto" or BCP-47)
+- target_lang: 翻訳先の言語 (BCP-47)
+
+JSON のみで返答:
+{
+  "detected_language": "実際に検出した BCP-47",
+  "language_name_ja": "検出言語の日本語名",
+  "translation": "翻訳結果",
+  "notes_ja": "店員へのヒント (発音注意・文化的背景など、任意)"
+}`;
+
+export async function interpret(
+  text: string,
+  sourceHint: string,
+  targetLang: string,
+): Promise<InterpretResult> {
+  const payload = `source_hint: ${sourceHint}\ntarget_lang: ${targetLang}\n---\n${text}`;
+  const res = await client().models.generateContent({
+    model: MODEL,
+    contents: payload,
+    config: {
+      systemInstruction: INTERPRET_SYSTEM,
+      responseMimeType: "application/json",
+      temperature: 0.3,
+      maxOutputTokens: 800,
+    },
+  });
+  const out = res.text;
+  if (!out) throw new Error("Gemini returned no text");
+  return parseJsonObject<InterpretResult>(out);
+}
+
+const INTRO_SYSTEM = `あなたは花屋の多言語案内アシスタントです。
+店の Web ページから抽出したテキストを受け取り、各国の観光客向けに分かりやすく要約・翻訳します。
+
+手順:
+1. テキストから店の概要・特徴・営業時間・アクセス・支払い方法等を抽出
+2. 各指定言語で 4〜6 文の温かい紹介文を作成
+3. それぞれに「お気軽にお声がけください」のような呼びかけを添える
+4. ja の項目には必ず日本語版も含める
+
+JSON のみで返答:
+{
+  "source_summary_ja": "ページから読み取った店の特徴の日本語要約",
+  "intros": [
+    {
+      "lang": "BCP-47",
+      "language_name_ja": "日本語名",
+      "greeting": "短い挨拶",
+      "about": "店の概要 (2〜3文)",
+      "specialties": "得意なこと・人気のもの",
+      "hours_access": "営業時間・アクセス・支払いなど",
+      "call_to_action": "声かけ・誘導の一言"
+    }
+  ]
+}`;
+
+export async function storeIntro(
+  pageText: string,
+  storeUrl: string,
+  targetLangs: string[],
+): Promise<StoreIntroResult> {
+  const payload =
+    `店の URL: ${storeUrl}\n` +
+    `対応する言語: ${targetLangs.join(", ")}\n` +
+    `---\n` +
+    `店の Web ページから抽出したテキスト:\n${pageText.slice(0, 12000)}`;
+
+  const res = await client().models.generateContent({
+    model: MODEL,
+    contents: payload,
+    config: {
+      systemInstruction: INTRO_SYSTEM,
+      responseMimeType: "application/json",
+      temperature: 0.6,
+      maxOutputTokens: 4000,
+    },
+  });
+  const out = res.text;
+  if (!out) throw new Error("Gemini returned no text");
+  return parseJsonObject<StoreIntroResult>(out);
 }
 
 function parseJsonObject<T>(text: string): T {
