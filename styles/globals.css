@@ -1,0 +1,133 @@
+:root {
+  --bg: #fdf7f4;
+  --fg: #2b2b2b;
+  --muted: #6b6b6b;
+  --accent: #d96b8a;
+  --accent-dark: #b94e6e;
+  --accent-light: #fbe6ed;
+  --border: #e5d6d0;
+  --card-bg: #ffffff;
+  --shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  --radius: 12px;
+  --max-width: 1100px;
+  font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", "Yu Gothic UI", "Noto Sans JP",
+    "Segoe UI", Roboto, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  min-height: 100vh;
+}
+
+a {
+  color: var(--accent-dark);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  font: inherit;
+  cursor: pointer;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: white;
+  padding: 8px 16px;
+  border-radius: 8px;
+}
+
+button:hover {
+  background: var(--accent-dark);
+  border-color: var(--accent-dark);
+}
+
+button.ghost {
+  background: transparent;
+  color: var(--accent-dark);
+}
+
+button.ghost:hover {
+  background: var(--accent-light);
+}
+
+button:disabled {
+  background: #ccc;
+  border-color: #ccc;
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: white;
+  width: 100%;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: 2px solid var(--accent-light);
+  border-color: var(--accent);
+}
+
+label {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+header {
+  background: white;
+  border-bottom: 1px solid var(--border);
+  padding: 12px 20px;
+}
+
+header nav {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  display: flex;
+  gap: 20px;
+  align-items: center;
+}
+
+header nav .brand {
+  font-weight: 700;
+  color: var(--accent-dark);
+  font-size: 1.1rem;
+}
+
+header nav a {
+  color: var(--fg);
+}
+
+header nav a.active {
+  color: var(--accent-dark);
+  font-weight: 600;
+}
+
+main {
+  max-width: var(--max-width);
+  margin: 0 auto;
+  padding: 24px 20px;
+}
+
+h1,
+h2,
+h3 {
+  color: var(--fg);
+}

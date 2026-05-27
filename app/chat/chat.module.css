@@ -1,0 +1,165 @@
+.lead {
+  color: var(--muted);
+  margin-bottom: 20px;
+}
+
+.history {
+  min-height: 240px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  margin-bottom: 16px;
+}
+
+.empty {
+  color: var(--muted);
+  text-align: center;
+  padding: 32px 0;
+}
+
+.customerTurn,
+.staffTurn {
+  display: flex;
+}
+
+.customerTurn {
+  justify-content: flex-end;
+}
+
+.staffTurn {
+  justify-content: flex-start;
+}
+
+.bubble {
+  max-width: 75%;
+  background: var(--accent-light);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+}
+
+.staffTurn .bubble {
+  background: white;
+}
+
+.role {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+
+.lang {
+  background: var(--accent);
+  color: white;
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.text {
+  white-space: pre-wrap;
+  line-height: 1.5;
+}
+
+.translation {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.reason {
+  margin-top: 8px;
+  font-size: 0.85rem;
+  color: var(--accent-dark);
+  font-style: italic;
+}
+
+.cards {
+  margin-top: 12px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.flowerCard {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.photo {
+  width: 100%;
+  height: 110px;
+  object-fit: cover;
+}
+
+.photoPlaceholder {
+  width: 100%;
+  height: 110px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.4rem;
+  background: var(--accent-light);
+}
+
+.flowerInfo {
+  padding: 8px 10px;
+}
+
+.flowerName {
+  font-weight: 600;
+}
+
+.subname {
+  color: var(--muted);
+  font-weight: 400;
+  font-size: 0.85rem;
+}
+
+.meaning {
+  color: var(--accent-dark);
+  font-size: 0.85rem;
+  margin: 4px 0;
+}
+
+.meta {
+  display: flex;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--muted);
+  flex-wrap: wrap;
+}
+
+.composer {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+}
+
+.composer textarea {
+  flex: 1;
+  resize: vertical;
+  min-height: 60px;
+}
+
+.composer button {
+  height: 60px;
+  padding: 0 24px;
+}
