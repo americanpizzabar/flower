@@ -2,18 +2,37 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-// Minimal cross-browser SpeechRecognition typing
-type SR = {
+interface SRAlternative {
+  transcript: string;
+}
+interface SRResult {
+  isFinal: boolean;
+  length: number;
+  0: SRAlternative;
+}
+interface SRResultList {
+  length: number;
+  [index: number]: SRResult;
+}
+interface SREvent {
+  results: SRResultList;
+  resultIndex: number;
+}
+interface SRErrorEvent {
+  error: string;
+}
+
+interface SR {
   lang: string;
   continuous: boolean;
   interimResults: boolean;
   start: () => void;
   stop: () => void;
   abort: () => void;
-  onresult: ((e: { results: { 0: { transcript: string } }[][] & { length: number } }) => void) | null;
-  onerror: ((e: { error: string }) => void) | null;
+  onresult: ((e: SREvent) => void) | null;
+  onerror: ((e: SRErrorEvent) => void) | null;
   onend: (() => void) | null;
-};
+}
 
 interface SRCtor {
   new (): SR;
@@ -28,17 +47,37 @@ function getRecognitionCtor(): SRCtor | null {
   return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 }
 
-export function useSpeechRecognition(opts: { lang: string; onFinal?: (text: string) => void }) {
+export function useSpeechRecognition(opts: {
+  lang: string;
+  onFinal?: (text: string) => void;
+  onError?: (error: string) => void;
+}) {
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [supported, setSupported] = useState(true);
   const recRef = useRef<SR | null>(null);
+  const finalTextRef = useRef("");
+  const onFinalRef = useRef(opts.onFinal);
+  const onErrorRef = useRef(opts.onError);
+
+  useEffect(() => {
+    onFinalRef.current = opts.onFinal;
+    onErrorRef.current = opts.onError;
+  }, [opts.onFinal, opts.onError]);
 
   useEffect(() => {
     setSupported(getRecognitionCtor() !== null);
   }, []);
 
   const start = useCallback(() => {
+    if (recRef.current) {
+      try {
+        recRef.current.abort();
+      } catch {
+        /* ignore */
+      }
+      recRef.current = null;
+    }
     const Ctor = getRecognitionCtor();
     if (!Ctor) {
       setSupported(false);
@@ -48,33 +87,53 @@ export function useSpeechRecognition(opts: { lang: string; onFinal?: (text: stri
     rec.lang = opts.lang;
     rec.continuous = false;
     rec.interimResults = true;
-    let finalText = "";
+    finalTextRef.current = "";
+
     rec.onresult = (e) => {
-      const results = e.results as unknown as Array<{ 0: { transcript: string }; isFinal?: boolean }>;
-      let text = "";
-      for (let i = 0; i < (results as unknown as { length: number }).length; i++) {
-        const r = results[i];
-        const transcript = r[0].transcript;
-        if (r.isFinal) finalText += transcript;
-        else text += transcript;
+      let interimText = "";
+      let appendedFinal = "";
+      for (let i = e.resultIndex || 0; i < e.results.length; i++) {
+        const r = e.results[i];
+        const transcript = r[0]?.transcript || "";
+        if (r.isFinal) appendedFinal += transcript;
+        else interimText += transcript;
       }
-      setInterim(text);
+      if (appendedFinal) finalTextRef.current += appendedFinal;
+      setInterim(interimText);
     };
-    rec.onerror = () => {
+
+    rec.onerror = (e) => {
       setListening(false);
+      setInterim("");
+      if (e.error && e.error !== "no-speech" && e.error !== "aborted") {
+        onErrorRef.current?.(e.error);
+      }
     };
+
     rec.onend = () => {
       setListening(false);
       setInterim("");
-      if (finalText && opts.onFinal) opts.onFinal(finalText.trim());
+      const finalText = finalTextRef.current.trim();
+      if (finalText) onFinalRef.current?.(finalText);
+      finalTextRef.current = "";
     };
-    rec.start();
-    recRef.current = rec;
-    setListening(true);
-  }, [opts]);
+
+    try {
+      rec.start();
+      recRef.current = rec;
+      setListening(true);
+    } catch (e) {
+      setListening(false);
+      onErrorRef.current?.(e instanceof Error ? e.message : "start failed");
+    }
+  }, [opts.lang]);
 
   const stop = useCallback(() => {
-    recRef.current?.stop();
+    try {
+      recRef.current?.stop();
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   return { listening, interim, supported, start, stop };

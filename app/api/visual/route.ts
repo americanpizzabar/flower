@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
-import { visualConsult, type MediaPart } from "@/lib/ai";
+import { AiError, visualConsult, type MediaPart } from "@/lib/ai";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 export const maxDuration = 60;
+
+const TOTAL_MB_LIMIT = 18;
 
 export async function POST(req: Request) {
   try {
@@ -14,20 +16,23 @@ export async function POST(req: Request) {
     const files = form.getAll("media");
 
     if (!wish) {
-      return NextResponse.json({ error: "wish is required" }, { status: 400 });
+      return NextResponse.json({ error: "お客様の希望が入力されていません" }, { status: 400 });
     }
     if (files.length === 0) {
-      return NextResponse.json({ error: "media is required" }, { status: 400 });
+      return NextResponse.json({ error: "写真または動画を1つ以上添付してください" }, { status: 400 });
     }
 
     const media: MediaPart[] = [];
+    let totalBytes = 0;
     for (const f of files) {
       if (!(f instanceof Blob)) continue;
       const buf = Buffer.from(await f.arrayBuffer());
-      const sizeMb = buf.byteLength / (1024 * 1024);
-      if (sizeMb > 18) {
+      totalBytes += buf.byteLength;
+      if (totalBytes / (1024 * 1024) > TOTAL_MB_LIMIT) {
         return NextResponse.json(
-          { error: `ファイルサイズが大きすぎます (${sizeMb.toFixed(1)}MB)。18MB 以下にしてください。` },
+          {
+            error: `合計サイズが ${TOTAL_MB_LIMIT}MB を超えました (${(totalBytes / 1024 / 1024).toFixed(1)}MB)。写真の枚数を減らすか、短い動画にしてください。`,
+          },
           { status: 413 },
         );
       }
@@ -40,8 +45,11 @@ export async function POST(req: Request) {
     const result = await visualConsult(wish, lang, media);
     return NextResponse.json(result);
   } catch (e) {
+    if (e instanceof AiError) {
+      return NextResponse.json({ error: e.message, code: e.code }, { status: e.status || 500 });
+    }
     return NextResponse.json(
-      { error: e instanceof Error ? e.message : "internal error" },
+      { error: e instanceof Error ? e.message : "通信エラーが発生しました" },
       { status: 500 },
     );
   }
