@@ -151,7 +151,7 @@ export async function askQuestion(opts: {
   return await callJson<AskQuestionResult>({
     system: ASK_SYSTEM,
     contents: payload,
-    maxOutputTokens: 800,
+    maxOutputTokens: 2000,
     temperature: 0.4,
   });
 }
@@ -381,6 +381,42 @@ interface CallArgs {
 }
 
 async function callJson<T>(args: CallArgs): Promise<T> {
+  // Escalate the output-token budget if the model truncates (MAX_TOKENS) or
+  // returns unparseable JSON. Gemini 2.5 can still spend tokens before emitting
+  // text, so a single fixed budget is fragile for multi-language replies.
+  const base = args.maxOutputTokens;
+  const budgets = Array.from(
+    new Set([base, Math.min(16000, base * 3 + 2000), 16000]),
+  );
+
+  let lastError: AiError = new AiError("AI 呼び出しに失敗しました", { code: "unknown" });
+  for (let i = 0; i < budgets.length; i++) {
+    const isLastBudget = i === budgets.length - 1;
+    try {
+      const text = await generateOnce(args, budgets[i]);
+      return parseJsonObject<T>(text);
+    } catch (e) {
+      const err =
+        e instanceof AiError
+          ? e
+          : new AiError("AI の応答を解析できませんでした。もう一度お試しください。", {
+              code: "parse_failed",
+            });
+      lastError = err;
+      // Truncation or a parse failure (often silent truncation) → retry bigger.
+      if ((err.code === "max_tokens" || err.code === "parse_failed") && !isLastBudget) {
+        continue;
+      }
+      throw err;
+    }
+  }
+  throw lastError;
+}
+
+// One generation with the given output budget, including network-level retries
+// for transient (overloaded / rate / server) errors. Returns the raw text or
+// throws an AiError (code "max_tokens" when the model truncated).
+async function generateOnce(args: CallArgs, maxOutputTokens: number): Promise<string> {
   const MAX_ATTEMPTS = 3;
   const backoffMs = [0, 1500, 3500];
 
@@ -400,7 +436,7 @@ async function callJson<T>(args: CallArgs): Promise<T> {
           systemInstruction: args.system,
           responseMimeType: "application/json",
           temperature: args.temperature,
-          maxOutputTokens: args.maxOutputTokens,
+          maxOutputTokens,
           // Gemini 2.5 spends "thinking" tokens out of maxOutputTokens before
           // emitting any text. For these structured extraction/translation
           // tasks thinking is unnecessary and was exhausting the budget,
@@ -422,43 +458,26 @@ async function callJson<T>(args: CallArgs): Promise<T> {
       (res as unknown as { candidates?: { finishReason?: string }[] }).candidates?.[0]
         ?.finishReason || "";
 
-    const text = res.text;
+    if (finishReason === "MAX_TOKENS") {
+      // Let callJson escalate the budget rather than failing outright.
+      throw new AiError("AI の応答が長すぎて途中で切れました。", { code: "max_tokens" });
+    }
+    if (finishReason === "SAFETY") {
+      throw new AiError(
+        "AI が安全上の理由で応答をブロックしました。表現を変えて再度お試しください。",
+        { code: "safety" },
+      );
+    }
 
+    const text = res.text;
     if (!text || text.trim() === "") {
-      if (finishReason === "SAFETY") {
-        throw new AiError(
-          "AI が安全上の理由で応答をブロックしました。表現を変えて再度お試しください。",
-          { code: "safety" },
-        );
-      }
-      if (finishReason === "MAX_TOKENS") {
-        throw new AiError(
-          "AI の応答が長すぎて途中で切れました。入力を短くして再度お試しください。",
-          { code: "max_tokens" },
-        );
-      }
       throw new AiError(
         `AI からの応答が空でした (finishReason: ${finishReason || "unknown"})。モデル名 (${MODEL}) や API キーの権限をご確認ください。`,
         { code: "empty_response" },
       );
     }
-
-    try {
-      return parseJsonObject<T>(text);
-    } catch {
-      if (finishReason === "MAX_TOKENS") {
-        throw new AiError(
-          "AI の応答が長すぎて JSON が途中で切れました。入力を短くするか、対応言語を減らしてみてください。",
-          { code: "max_tokens" },
-        );
-      }
-      throw new AiError(
-        "AI の応答を解析できませんでした。もう一度お試しください。",
-        { code: "parse_failed" },
-      );
-    }
+    return text;
   }
-  // Should be unreachable since the loop either returns or throws
   throw lastError ?? new AiError("AI 呼び出しに失敗しました", { code: "unknown" });
 }
 
