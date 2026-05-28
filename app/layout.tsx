@@ -20,6 +20,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/show">花を見せる</Link>
             <Link href="/interpret">通訳</Link>
             <Link href="/welcome">店舗紹介</Link>
+            <Link href="/manual">マニュアル</Link>
           </nav>
         </header>
         <main>{children}</main>

@@ -26,6 +26,12 @@ const TOOLS = [
     title: "店舗紹介",
     desc: "お店の URL を入れるだけで、多言語の店舗紹介を自動生成。観光客の最初の一歩に。",
   },
+  {
+    href: "/manual",
+    emoji: "📖",
+    title: "使い方マニュアル",
+    desc: "はじめての方向けに、4 つの機能をわかりやすく説明しています。困ったときにご覧ください。",
+  },
 ];
 
 export default function HomePage() {
@@ -33,7 +39,7 @@ export default function HomePage() {
     <div>
       <h1 className={styles.hero}>🌸 ようこそ、Hanakotoba へ</h1>
       <p className={styles.lead}>
-        4つの営業ツールで、世界中のお客様と花でつながります。
+        4つの営業ツールと使い方マニュアルで、世界中のお客様と花でつながります。
       </p>
 
       <div className={styles.cards}>
