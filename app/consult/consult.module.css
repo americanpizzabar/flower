@@ -153,6 +153,55 @@
   font-size: 1rem;
 }
 
+.askBox {
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  margin-bottom: 12px;
+}
+
+.askLabel {
+  font-size: 0.85rem;
+  color: var(--accent-dark);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.slotChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.chip {
+  background: var(--bg);
+  color: var(--accent-dark);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 0.9rem;
+}
+
+.chip:hover:not(:disabled) {
+  background: var(--accent-light);
+  border-color: var(--accent);
+}
+
+.customAskRow {
+  display: flex;
+  gap: 8px;
+}
+
+.customAskRow input {
+  flex: 1;
+}
+
+.customAskRow button {
+  white-space: nowrap;
+}
+
 .composer {
   display: flex;
   gap: 10px;

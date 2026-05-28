@@ -2,7 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import styles from "./show.module.css";
-import { SUPPORTED_LANGS, type VisualResult } from "@/lib/types";
+import {
+  SUPPORTED_LANGS,
+  type ConsultTurn,
+  type ProposalResult,
+  type VisualBriefResult,
+} from "@/lib/types";
 import { useSpeechRecognition, speak } from "@/lib/speech";
 import {
   compressImage,
@@ -13,23 +18,39 @@ import {
   videoDuration,
 } from "@/lib/video";
 
+type Step = "hearing" | "capture" | "result";
+
 interface MediaFile {
   file: File;
   url: string;
   kind: "image" | "video";
 }
 
+interface ChatTurn {
+  role: "customer" | "assistant";
+  text: string;
+}
+
 export default function ShowPage() {
-  const [step, setStep] = useState<"wish" | "capture" | "result">("wish");
+  const [step, setStep] = useState<Step>("hearing");
   const [lang, setLang] = useState("en");
-  const [wish, setWish] = useState("");
+
+  // Hearing
+  const [turns, setTurns] = useState<ChatTurn[]>([]);
+  const [input, setInput] = useState("");
+  const [brief, setBrief] = useState<VisualBriefResult | null>(null);
+  const [hearLoading, setHearLoading] = useState(false);
+
+  // Capture
   const [media, setMedia] = useState<MediaFile[]>([]);
-  const [result, setResult] = useState<VisualResult | null>(null);
-  const [loading, setLoading] = useState(false);
   const [trimming, setTrimming] = useState(false);
-  const [error, setError] = useState("");
   const [cameraSupported, setCameraSupported] = useState(false);
 
+  // Generate
+  const [generating, setGenerating] = useState(false);
+  const [result, setResult] = useState<ProposalResult | null>(null);
+
+  const [error, setError] = useState("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const camera = useInAppCamera();
 
@@ -39,38 +60,70 @@ export default function ShowPage() {
 
   useEffect(() => {
     camera.onCapture(async (file) => {
-      const kind: "image" | "video" = file.type.startsWith("video/") ? "video" : "image";
-      const finalFile = kind === "image" ? await compressImage(file).catch(() => file) : file;
-      const url = URL.createObjectURL(finalFile);
-      setMedia((prev) => [...prev, { file: finalFile, url, kind }]);
+      if (file.type.startsWith("video/")) {
+        const url = URL.createObjectURL(file);
+        setMedia((prev) => [...prev, { file, url, kind: "video" }]);
+        return;
+      }
+      const compressed = await compressImage(file).catch(() => file);
+      const url = URL.createObjectURL(compressed);
+      setMedia((prev) => [...prev, { file: compressed, url, kind: "image" }]);
     });
   }, [camera]);
 
   const speechLang = SUPPORTED_LANGS.find((l) => l.code === lang)?.speech || "en-US";
   const speech = useSpeechRecognition({
     lang: speechLang,
-    onFinal: (t) => setWish((prev) => (prev ? `${prev} ${t}` : t)),
+    onFinal: (t) => setInput((prev) => (prev ? `${prev} ${t}` : t)),
   });
+
+  async function sendHearing() {
+    const text = input.trim();
+    if (!text || hearLoading) return;
+    setInput("");
+    setError("");
+    setHearLoading(true);
+    const history: ConsultTurn[] = turns.map((t) => ({ role: t.role, text: t.text }));
+    setTurns((prev) => [...prev, { role: "customer", text }]);
+    try {
+      const res = await fetch("/api/visual/brief", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, history, lang }),
+      });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        const t = await res.text();
+        throw new Error(`サーバーから予期しない応答 (HTTP ${res.status}): ${t.slice(0, 120)}`);
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "失敗しました");
+      const b = data as VisualBriefResult;
+      setBrief(b);
+      setTurns((prev) => [...prev, { role: "assistant", text: b.reply_to_customer }]);
+      speak(b.reply_to_customer, speechLang);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "通信エラー");
+      setTurns((prev) => prev.slice(0, -1));
+      setInput(text);
+    } finally {
+      setHearLoading(false);
+    }
+  }
 
   async function onFiles(files: FileList | null) {
     if (!files || files.length === 0) return;
     setError("");
     const arr = Array.from(files);
     const next: MediaFile[] = [];
-
     for (const f of arr) {
-      const isVideo = f.type.startsWith("video/");
-      if (isVideo) {
+      if (f.type.startsWith("video/")) {
         const sec = await videoDuration(f).catch(() => 0);
         if (sec > MAX_VIDEO_SECONDS + 0.5) {
           setTrimming(true);
           try {
             const trimmed = await trimVideo(f);
-            next.push({
-              file: trimmed,
-              url: URL.createObjectURL(trimmed),
-              kind: "video",
-            });
+            next.push({ file: trimmed, url: URL.createObjectURL(trimmed), kind: "video" });
           } catch (e) {
             setError(e instanceof Error ? e.message : "動画のトリミングに失敗しました");
           } finally {
@@ -84,7 +137,6 @@ export default function ShowPage() {
         next.push({ file: compressed, url: URL.createObjectURL(compressed), kind: "image" });
       }
     }
-
     if (next.length > 0) setMedia((prev) => [...prev, ...next]);
   }
 
@@ -97,67 +149,64 @@ export default function ShowPage() {
     });
   }
 
-  async function submit() {
-    if (!wish.trim() || media.length === 0) return;
-    setLoading(true);
-    setError("");
-    try {
-      const totalBytes = media.reduce((s, m) => s + m.file.size, 0);
-      const totalMb = totalBytes / (1024 * 1024);
-      if (totalMb > 4) {
-        setError(
-          `添付の合計サイズが ${totalMb.toFixed(1)}MB です。サーバーの上限 (4MB) を超えるため、写真の枚数を減らすか、動画を短くしてください。`,
-        );
-        setLoading(false);
-        return;
-      }
+  function briefText(): string {
+    if (!brief) return turns.map((t) => t.text).join(" / ");
+    return [brief.brief_ja, brief.flower_language_ja ? `花言葉: ${brief.flower_language_ja}` : ""]
+      .filter(Boolean)
+      .join("\n");
+  }
 
+  async function generate() {
+    const photos = media.filter((m) => m.kind === "image");
+    if (photos.length === 0) {
+      setError("組み合わせ画像の生成には花の写真が必要です。写真を1枚以上追加してください。");
+      return;
+    }
+    setGenerating(true);
+    setError("");
+    camera.close();
+    try {
+      const totalMb = photos.reduce((s, m) => s + m.file.size, 0) / (1024 * 1024);
+      if (totalMb > 4) {
+        throw new Error(
+          `写真の合計サイズが ${totalMb.toFixed(1)}MB です。上限 (4MB) を超えるため枚数を減らしてください。`,
+        );
+      }
       const form = new FormData();
-      form.append("wish", wish);
+      form.append("brief", briefText());
       form.append("lang", lang);
-      media.forEach((m) => form.append("media", m.file));
-      const res = await fetch("/api/visual", { method: "POST", body: form });
+      photos.forEach((m) => form.append("media", m.file));
+      const res = await fetch("/api/visual/generate", { method: "POST", body: form });
 
       if (res.status === 413) {
-        throw new Error(
-          "サーバーの上限を超えています。写真の枚数を減らすか、動画を短くしてください。",
-        );
+        throw new Error("写真の合計サイズが大きすぎます。枚数を減らしてください。");
       }
-
       const ct = res.headers.get("content-type") || "";
-      let data: { error?: string } & VisualResult;
-      if (ct.includes("application/json")) {
-        data = await res.json();
-      } else {
-        const text = await res.text();
-        throw new Error(
-          `サーバーから予期しない応答が返りました (HTTP ${res.status}): ${text.slice(0, 120)}`,
-        );
+      if (!ct.includes("application/json")) {
+        const t = await res.text();
+        throw new Error(`サーバーから予期しない応答 (HTTP ${res.status}): ${t.slice(0, 120)}`);
       }
+      const data = await res.json();
       if (!res.ok) throw new Error(data.error || "失敗しました");
-      setResult(data);
-      camera.close();
+      setResult(data as ProposalResult);
       setStep("result");
     } catch (e) {
       setError(e instanceof Error ? e.message : "通信エラー");
     } finally {
-      setLoading(false);
+      setGenerating(false);
     }
   }
 
   function reset() {
     media.forEach((m) => URL.revokeObjectURL(m.url));
     setMedia([]);
-    setWish("");
+    setTurns([]);
+    setBrief(null);
+    setInput("");
     setResult(null);
     setError("");
     camera.close();
-    setStep("wish");
-  }
-
-  function backToCapture() {
-    setResult(null);
-    setStep("capture");
+    setStep("hearing");
   }
 
   function openLibrary() {
@@ -178,48 +227,73 @@ export default function ShowPage() {
 
   return (
     <div>
-      <h1>📸 花を撮って見せる</h1>
+      <h1>📸 花を見せる（組み合わせ提案）</h1>
       <p className={styles.lead}>
-        お客様の希望を聞いた上で、店内の花をカメラで撮影してご案内します。
+        お客様の要望を花言葉も含めて伺い、店内の花を撮影すると、AI
+        が組み合わせの提案画像を生成します。
       </p>
 
       <ol className={styles.stepper}>
-        <li
-          className={
-            step === "wish"
-              ? styles.active
-              : step === "capture" || step === "result"
-                ? styles.done
-                : ""
-          }
-        >
-          1. 希望を聞く
-        </li>
+        <li className={step === "hearing" ? styles.active : styles.done}>1. 要望を伺う</li>
         <li
           className={step === "capture" ? styles.active : step === "result" ? styles.done : ""}
         >
           2. 花を撮る
         </li>
-        <li className={step === "result" ? styles.active : ""}>3. お客様に見せる</li>
+        <li className={step === "result" ? styles.active : ""}>3. 提案画像を見せる</li>
       </ol>
 
-      {step === "wish" && (
+      {/* Step 1: hearing */}
+      {step === "hearing" && (
         <div className={styles.card}>
-          <label>お客様の言語</label>
-          <select value={lang} onChange={(e) => setLang(e.target.value)}>
-            {SUPPORTED_LANGS.map((l) => (
-              <option key={l.code} value={l.code}>
-                {l.label_ja} ({l.code})
-              </option>
-            ))}
-          </select>
+          {turns.length === 0 && (
+            <>
+              <label>お客様の言語</label>
+              <select value={lang} onChange={(e) => setLang(e.target.value)}>
+                {SUPPORTED_LANGS.map((l) => (
+                  <option key={l.code} value={l.code}>
+                    {l.label_ja} ({l.code})
+                  </option>
+                ))}
+              </select>
+            </>
+          )}
 
-          <label className={styles.mt}>お客様の希望</label>
+          {turns.length > 0 && (
+            <div className={styles.chat}>
+              {turns.map((t, i) => (
+                <div
+                  key={i}
+                  className={t.role === "customer" ? styles.customerRow : styles.assistantRow}
+                >
+                  <div className={styles.bubble}>
+                    <div className={styles.bubbleRole}>
+                      {t.role === "customer" ? "お客様" : "AI"}
+                    </div>
+                    <div>{t.text}</div>
+                    {t.role === "assistant" && (
+                      <button
+                        className="ghost"
+                        style={{ marginTop: 6, padding: "4px 10px", fontSize: "0.85rem" }}
+                        onClick={() => speak(t.text, speechLang)}
+                      >
+                        🔊 読み上げ
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <label className={styles.mt}>
+            {turns.length === 0 ? "お客様の要望（花言葉や雰囲気など）" : "お客様の返事"}
+          </label>
           <textarea
-            value={wish + (speech.interim ? ` ${speech.interim}` : "")}
-            onChange={(e) => setWish(e.target.value)}
-            rows={5}
-            placeholder="例: I want something pink and elegant for an anniversary..."
+            value={input + (speech.interim ? ` ${speech.interim}` : "")}
+            onChange={(e) => setInput(e.target.value)}
+            rows={4}
+            placeholder="例: A romantic red bouquet for a wedding anniversary, meaning deep love..."
           />
 
           <div className={styles.actions}>
@@ -233,21 +307,43 @@ export default function ShowPage() {
                   🎤 音声で入力
                 </button>
               ))}
-            <button onClick={() => setStep("capture")} disabled={!wish.trim()}>
-              次へ: 花を撮る
+            <button onClick={sendHearing} disabled={hearLoading || !input.trim()}>
+              {hearLoading ? "整理中..." : "送信"}
+            </button>
+          </div>
+
+          {brief && (
+            <div className={styles.briefBox}>
+              <div className={styles.briefTitle}>📋 ここまでの要望（店員向け）</div>
+              <p>{brief.brief_ja}</p>
+              {brief.flower_language_ja && (
+                <p className={styles.flowerLang}>🌸 花言葉: {brief.flower_language_ja}</p>
+              )}
+              {brief.follow_up_ja && (
+                <p className={styles.nextHint}>次の確認（日本語）: {brief.follow_up_ja}</p>
+              )}
+            </div>
+          )}
+
+          {error && <p className={styles.error}>{error}</p>}
+
+          <div className={styles.actions}>
+            <button onClick={() => setStep("capture")} disabled={!brief}>
+              次へ: 花を撮る →
             </button>
           </div>
         </div>
       )}
 
+      {/* Step 2: capture */}
       {step === "capture" && (
         <div className={styles.card}>
           <p className={styles.note}>
-            店員さんがカメラで店内の花を撮影してください。<br />
-            動画は最大 {MAX_VIDEO_SECONDS} 秒。超過分は自動でカットされます。
+            店内の花を撮影 / アップロードしてください。複数枚の花を組み合わせた提案画像を生成します。
+            <br />
+            （画像生成の入力に使われるのは写真です）
           </p>
 
-          {/* In-app camera (preferred when supported) */}
           {cameraSupported && (
             <div className={styles.cameraBlock}>
               {!camera.isOpen ? (
@@ -289,7 +385,6 @@ export default function ShowPage() {
             </div>
           )}
 
-          {/* Fallback / library */}
           <div className={styles.fallbackRow}>
             {!cameraSupported && (
               <>
@@ -309,9 +404,7 @@ export default function ShowPage() {
             onChange={(e) => onFiles(e.target.files)}
           />
 
-          {trimming && (
-            <p className={styles.note}>動画を {MAX_VIDEO_SECONDS} 秒にトリミング中...</p>
-          )}
+          {trimming && <p className={styles.note}>動画を {MAX_VIDEO_SECONDS} 秒にトリミング中...</p>}
 
           {media.length > 0 && (
             <div className={styles.previewGrid}>
@@ -337,71 +430,56 @@ export default function ShowPage() {
               className="ghost"
               onClick={() => {
                 camera.close();
-                setStep("wish");
+                setStep("hearing");
               }}
             >
               ← 戻る
             </button>
-            <button onClick={submit} disabled={loading || media.length === 0}>
-              {loading ? "AI 解析中..." : "お客様に見せる"}
+            <button onClick={generate} disabled={generating || media.length === 0}>
+              {generating ? "提案画像を生成中..." : "✨ 提案画像を生成"}
             </button>
           </div>
+
+          {generating && (
+            <p className={styles.note}>
+              AI が花を組み合わせた提案画像を作成しています（数秒〜十数秒かかります）...
+            </p>
+          )}
         </div>
       )}
 
+      {/* Step 3: result */}
       {step === "result" && result && (
         <div className={styles.result}>
-          <div className={styles.mediaShow}>
-            {media.map((m, i) =>
-              m.kind === "image" ? (
-                <img key={i} src={m.url} alt="" className={styles.bigMedia} />
-              ) : (
-                <video
-                  key={i}
-                  src={m.url}
-                  controls
-                  playsInline
-                  className={styles.bigMedia}
-                />
-              ),
-            )}
-          </div>
+          <img src={result.image_data_url} alt="提案アレンジ" className={styles.generatedImage} />
 
           <div className={styles.customerBox}>
-            <div className={styles.tagRow}>
-              <span className={styles.langTag}>{result.language_name_ja}</span>
-            </div>
             <h2>お客様へ</h2>
-            <p className={styles.bigText}>{result.description_for_customer}</p>
+            <p className={styles.bigText}>{result.description_customer}</p>
             <button
               className="ghost"
-              onClick={() => speak(result.description_for_customer, speechLang)}
+              onClick={() => speak(result.description_customer, speechLang)}
             >
               🔊 読み上げる
             </button>
-
-            <p className={styles.followUp}>{result.follow_up_to_customer}</p>
-            <button
-              className="ghost"
-              onClick={() => speak(result.follow_up_to_customer, speechLang)}
-            >
-              🔊 質問を読み上げる
-            </button>
           </div>
 
-          <details className={styles.staffBox}>
-            <summary>店員向けメモ (日本語)</summary>
-            <p>
-              <strong>写っているもの:</strong> {result.what_we_see_ja}
-            </p>
-            <p>
-              <strong>希望との合致度:</strong> {result.match_assessment_ja}
-            </p>
+          <details className={styles.staffBox} open>
+            <summary>店員向け（日本語）</summary>
+            <p>{result.description_ja}</p>
+            {result.flower_meanings_ja && (
+              <p className={styles.flowerLang}>🌸 花言葉: {result.flower_meanings_ja}</p>
+            )}
           </details>
 
+          {error && <p className={styles.error}>{error}</p>}
+
           <div className={styles.bottomActions}>
-            <button className="ghost" onClick={backToCapture}>
-              ← 別の花を撮る
+            <button className="ghost" onClick={() => setStep("capture")}>
+              ← 花を撮り直す
+            </button>
+            <button className="ghost" onClick={generate} disabled={generating}>
+              {generating ? "生成中..." : "🔁 別の組み合わせを生成"}
             </button>
             <button onClick={reset}>最初から</button>
           </div>

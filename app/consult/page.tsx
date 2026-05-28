@@ -22,8 +22,10 @@ export default function ConsultPage() {
   const [lang, setLang] = useState("en");
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
+  const [customQ, setCustomQ] = useState("");
   const [state, setState] = useState<ConsultResult | null>(null);
   const [loading, setLoading] = useState(false);
+  const [asking, setAsking] = useState(false);
   const [error, setError] = useState("");
   const [autoSpeak, setAutoSpeak] = useState(true);
   const historyEndRef = useRef<HTMLDivElement>(null);
@@ -38,6 +40,10 @@ export default function ConsultPage() {
     historyEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [turns]);
 
+  function apiHistory(): ConsultTurn[] {
+    return turns.map((t) => ({ role: t.role, text: t.text }));
+  }
+
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
@@ -45,20 +51,15 @@ export default function ConsultPage() {
     setError("");
     setLoading(true);
 
-    const nextTurns: ChatTurn[] = [...turns, { role: "customer", text }];
-    setTurns(nextTurns);
+    const history = apiHistory();
+    setTurns((prev) => [...prev, { role: "customer", text }]);
 
     try {
-      const apiHistory: ConsultTurn[] = turns.map((t) => ({
-        role: t.role,
-        text: t.text,
-      }));
       const res = await fetch("/api/consult", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, history: apiHistory, lang }),
+        body: JSON.stringify({ text, history, lang }),
       });
-
       const ct = res.headers.get("content-type") || "";
       if (!ct.includes("application/json")) {
         const t = await res.text();
@@ -71,15 +72,9 @@ export default function ConsultPage() {
       setState(result);
       setTurns((prev) => [
         ...prev,
-        {
-          role: "assistant",
-          text: result.reply_to_customer,
-          language: result.detected_language,
-        },
+        { role: "assistant", text: result.reply_to_customer, language: result.detected_language },
       ]);
-      if (autoSpeak && result.reply_to_customer) {
-        speak(result.reply_to_customer, speechLang);
-      }
+      if (autoSpeak && result.reply_to_customer) speak(result.reply_to_customer, speechLang);
     } catch (e) {
       setError(e instanceof Error ? e.message : "通信エラー");
       setTurns((prev) => prev.slice(0, -1));
@@ -89,22 +84,61 @@ export default function ConsultPage() {
     }
   }
 
+  async function ask(mode: "slot" | "custom", slot?: SlotKey, customText?: string) {
+    if (asking || loading) return;
+    setError("");
+    setAsking(true);
+    try {
+      const res = await fetch("/api/consult/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode,
+          slot,
+          custom_ja: customText,
+          lang,
+          history: apiHistory(),
+        }),
+      });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        const t = await res.text();
+        throw new Error(`サーバーから予期しない応答 (HTTP ${res.status}): ${t.slice(0, 120)}`);
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "失敗しました");
+
+      setTurns((prev) => [
+        ...prev,
+        { role: "assistant", text: data.question_customer_lang, language: lang },
+      ]);
+      if (mode === "custom") setCustomQ("");
+      if (autoSpeak) speak(data.question_customer_lang, speechLang);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "通信エラー");
+    } finally {
+      setAsking(false);
+    }
+  }
+
   function reset() {
     setTurns([]);
     setState(null);
     setInput("");
+    setCustomQ("");
     setError("");
   }
 
   const filled = new Set<SlotKey>(state?.filled_slots || []);
   const isReady = state?.is_ready === true;
+  const conversationStarted = turns.length > 0;
 
   return (
     <div>
       <h1>🎨 イメージで提案</h1>
       <p className={styles.lead}>
-        お客様と AI が会話しながら、必要な情報を順番に聞き出します。
-        十分集まったら店員さんに伝わる形で要約されます。
+        お客様と AI が会話しながら必要な情報を集めます。店員さんが聞きたい項目を選んだり、
+        自由に質問を入力することもできます。
       </p>
 
       {turns.length === 0 && (
@@ -119,7 +153,7 @@ export default function ConsultPage() {
           </select>
           <p className={styles.hint}>
             最初に話したいことをお客様に入力 / 発話してもらってください。
-            その後は AI が必要な質問を投げかけていきます。
+            その後は AI の提案に加えて、店員さんからも質問できます。
           </p>
         </div>
       )}
@@ -168,13 +202,10 @@ export default function ConsultPage() {
           </div>
         )}
         {turns.map((t, i) => (
-          <div
-            key={i}
-            className={t.role === "customer" ? styles.customerRow : styles.assistantRow}
-          >
+          <div key={i} className={t.role === "customer" ? styles.customerRow : styles.assistantRow}>
             <div className={styles.bubble}>
               <div className={styles.role}>
-                {t.role === "customer" ? "お客様" : "AI"}
+                {t.role === "customer" ? "お客様" : "AI / 店員"}
                 {t.language && <span className={styles.langTag}>{t.language}</span>}
               </div>
               <div className={styles.text}>{t.text}</div>
@@ -195,6 +226,46 @@ export default function ConsultPage() {
 
       {error && <p className={styles.error}>{error}</p>}
 
+      {/* Staff-driven question controls */}
+      {conversationStarted && (
+        <div className={styles.askBox}>
+          <div className={styles.askLabel}>店員さんから聞く（お客様の言語に翻訳して質問します）</div>
+          <div className={styles.slotChips}>
+            {CONSULT_SLOTS.map((s) => (
+              <button
+                key={s.key}
+                className={styles.chip}
+                disabled={asking || loading}
+                onClick={() => ask("slot", s.key)}
+              >
+                {filled.has(s.key) ? "🔁 " : "＋ "}
+                {s.label_ja}
+              </button>
+            ))}
+          </div>
+          <div className={styles.customAskRow}>
+            <input
+              value={customQ}
+              onChange={(e) => setCustomQ(e.target.value)}
+              placeholder="自由に質問を入力（日本語）例: アレルギーのあるお花はありますか？"
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && customQ.trim()) {
+                  e.preventDefault();
+                  ask("custom", undefined, customQ.trim());
+                }
+              }}
+            />
+            <button
+              disabled={asking || loading || !customQ.trim()}
+              onClick={() => ask("custom", undefined, customQ.trim())}
+            >
+              {asking ? "..." : "質問する"}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Customer input */}
       <div className={styles.composer}>
         <textarea
           value={input + (speech.interim ? ` ${speech.interim}` : "")}
@@ -202,7 +273,7 @@ export default function ConsultPage() {
           rows={3}
           placeholder={
             turns.length === 0
-              ? "例: I'd like flowers for my mother's birthday..."
+              ? "お客様: 例) I'd like flowers for my mother's birthday..."
               : "お客様の返事を入力 / 音声で..."
           }
           onKeyDown={(e) => {
@@ -250,12 +321,10 @@ export default function ConsultPage() {
         <div className={styles.staffPanel}>
           <h2>📋 店員さんへ</h2>
           <p className={styles.summary}>{state.cumulative_summary_ja}</p>
-          {state.staff_note_ja && (
-            <p className={styles.staffNote}>💡 {state.staff_note_ja}</p>
-          )}
-          {!isReady && state.next_question_to_customer && (
+          {state.staff_note_ja && <p className={styles.staffNote}>💡 {state.staff_note_ja}</p>}
+          {!isReady && state.next_question_to_customer_ja && (
             <p className={styles.nextHint}>
-              次にお客様へ:「{state.next_question_to_customer}」
+              AI のおすすめ次の質問（日本語）:「{state.next_question_to_customer_ja}」
             </p>
           )}
         </div>

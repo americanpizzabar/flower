@@ -127,20 +127,31 @@ export function useInAppCamera(): InAppCamera {
         audio: true,
       });
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.muted = true;
-        await videoRef.current.play().catch(() => {});
-      }
+      // The <video> element only mounts once isOpen flips to true, so we
+      // attach the stream in the effect below (not here, where the ref is null).
       setIsOpen(true);
     } catch (e) {
       setError(
-        e instanceof Error && /permission/i.test(e.message)
+        e instanceof Error && /permission|denied|notallowed/i.test(e.message + (e.name || ""))
           ? "カメラへのアクセスが許可されませんでした。ブラウザの設定からカメラを許可してください。"
           : `カメラを起動できませんでした: ${e instanceof Error ? e.message : "unknown"}`,
       );
     }
   }, []);
+
+  // Attach the captured stream once the video element is actually mounted.
+  useEffect(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (isOpen && video && stream) {
+      video.srcObject = stream;
+      video.muted = true;
+      video.playsInline = true;
+      const tryPlay = () => video.play().catch(() => {});
+      if (video.readyState >= 1) tryPlay();
+      else video.onloadedmetadata = tryPlay;
+    }
+  }, [isOpen]);
 
   const startRecording = useCallback(() => {
     if (!streamRef.current) return;

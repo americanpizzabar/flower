@@ -4,19 +4,15 @@ export type SlotKey =
   | "budget"
   | "color"
   | "flower_language"
-  | "style"
-  | "delivery"
-  | "deadline";
+  | "style";
 
 export const CONSULT_SLOTS: { key: SlotKey; label_ja: string; required: boolean }[] = [
   { key: "recipient", label_ja: "贈る相手", required: true },
   { key: "occasion", label_ja: "用途・場面", required: true },
   { key: "budget", label_ja: "予算", required: true },
   { key: "color", label_ja: "色・雰囲気", required: false },
-  { key: "flower_language", label_ja: "込めたい意味", required: false },
+  { key: "flower_language", label_ja: "込めたい意味・花言葉", required: false },
   { key: "style", label_ja: "スタイル(花束/アレンジ等)", required: false },
-  { key: "delivery", label_ja: "受け取り方法", required: false },
-  { key: "deadline", label_ja: "いつ必要か", required: false },
 ];
 
 export interface ConsultTurn {
@@ -31,8 +27,6 @@ export interface ConsultKeywords {
   color?: string[];
   flower_language?: string[];
   style?: string;
-  delivery?: string;
-  deadline?: string;
 }
 
 export interface ConsultResult {
@@ -44,17 +38,31 @@ export interface ConsultResult {
   missing_slots: SlotKey[];
   reply_to_customer: string;
   next_question_to_customer: string | null;
+  next_question_to_customer_ja: string | null;
   is_ready: boolean;
   staff_note_ja?: string;
 }
 
-export interface VisualResult {
+export interface AskQuestionResult {
+  question_customer_lang: string;
+  question_ja: string;
+}
+
+export interface VisualBriefResult {
   detected_language: string;
   language_name_ja: string;
-  what_we_see_ja: string;
-  description_for_customer: string;
-  match_assessment_ja: string;
-  follow_up_to_customer: string;
+  brief_ja: string;
+  flower_language_ja: string;
+  reply_to_customer: string;
+  follow_up_ja: string;
+  is_ready: boolean;
+}
+
+export interface ProposalResult {
+  image_data_url: string;
+  description_customer: string;
+  description_ja: string;
+  flower_meanings_ja: string;
 }
 
 export interface InterpretResult {

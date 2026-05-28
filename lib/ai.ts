@@ -1,10 +1,11 @@
 import { GoogleGenAI } from "@google/genai";
 import type {
+  AskQuestionResult,
   ConsultResult,
   ConsultTurn,
   InterpretResult,
   StoreIntroResult,
-  VisualResult,
+  VisualBriefResult,
 } from "./types";
 import { CONSULT_SLOTS } from "./types";
 
@@ -51,11 +52,11 @@ ${SLOT_DESCRIPTIONS}
 2. 会話全体から各 slot に該当する情報を抽出し、累積した keywords を更新する (過去のターンで分かったことを引き継ぐ)
 3. filled_slots と missing_slots を計算する
 4. 必須 slot (recipient, occasion, budget) が全部埋まり、かつお客様が「もう十分」というニュアンスを示したら is_ready=true。それ以外は false
-5. is_ready が false なら、missing_slots の中で最も自然に次に聞ける項目を 1 つ選び、お客様の言語で短い質問 (next_question_to_customer) を作る
+5. is_ready が false なら、missing_slots の中で最も自然に次に聞ける項目を 1 つ選び、お客様の言語の質問 (next_question_to_customer) と、その日本語訳 (next_question_to_customer_ja) を作る
    - 質問は 1 つだけ。たくさん聞かない
    - 既に分かっている内容を踏まえて自然な会話の流れにする
    - 必須項目を優先するが、文脈に応じて柔軟に
-6. is_ready が true なら next_question_to_customer は null
+6. is_ready が true なら next_question_to_customer と next_question_to_customer_ja はどちらも null
 7. reply_to_customer はお客様の言語で「ありがとうございます。〜について教えていただけますか？」のように、共感の一言 + 次の質問を組み合わせる (is_ready=true なら締めの一言)
 8. cumulative_summary_ja は店員向けに会話全体から分かったことを日本語で簡潔にまとめる
 9. staff_note_ja には、店員に補足したいニュアンスや注意点 (任意)
@@ -68,13 +69,13 @@ JSON のみ (前後にテキストやコードフェンスを付けない):
   "cumulative_summary_ja": "店員向け要約",
   "keywords": {
     "recipient": "...", "occasion": "...", "budget": "...",
-    "color": ["..."], "flower_language": ["..."],
-    "style": "...", "delivery": "...", "deadline": "..."
+    "color": ["..."], "flower_language": ["..."], "style": "..."
   },
   "filled_slots": ["recipient", "occasion"],
   "missing_slots": ["budget", "color"],
   "reply_to_customer": "お客様の言語で",
   "next_question_to_customer": "お客様の言語で次に聞きたい質問 (is_ready=true なら null)",
+  "next_question_to_customer_ja": "上記質問の日本語訳 (is_ready=true なら null)",
   "is_ready": false,
   "staff_note_ja": "店員向けメモ (任意)"
 }`;
@@ -104,49 +105,194 @@ export async function consultChat(
   });
 }
 
-const VISUAL_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
-店員が撮影した店内の花の写真 (または短い動画) と、お客様の希望テキストを受け取ります。
+const ASK_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
+店員が「お客様に聞きたいこと」を指定するので、これまでの会話の流れに沿った自然な質問文を作ります。
 
-手順:
-1. 画像/動画に写っている花を観察 (種類、色、本数の目安、雰囲気)
-2. お客様の希望と照らし合わせ、合致度・代案を判断
-3. お客様の言語で「これは○○の花で、〜〜のイメージにぴったりです」のような案内を作る
-4. 店員向けに日本語で何が写っているか・どう案内したかを補足
-5. お客様に対して次の質問を投げかける
+- target_lang の言語で、丁寧で温かい 1 文の質問を作る (question_customer_lang)
+- その日本語訳も作る (question_ja)
+- 会話履歴を踏まえ、既に分かっていることは繰り返さない
 
 JSON のみで返答 (前後にテキストやコードフェンスを付けない):
 {
-  "detected_language": "BCP-47",
-  "language_name_ja": "日本語名",
-  "what_we_see_ja": "店員向け日本語",
-  "description_for_customer": "お客様の言語",
-  "match_assessment_ja": "店員向け",
-  "follow_up_to_customer": "お客様の言語"
+  "question_customer_lang": "target_lang の質問",
+  "question_ja": "その日本語訳"
 }`;
+
+const SLOT_LABELS: Record<string, string> = Object.fromEntries(
+  CONSULT_SLOTS.map((s) => [s.key, s.label_ja]),
+);
+
+export async function askQuestion(opts: {
+  mode: "slot" | "custom";
+  slot?: string;
+  customJa?: string;
+  lang: string;
+  history: ConsultTurn[];
+}): Promise<AskQuestionResult> {
+  const historyBlock =
+    opts.history.length === 0
+      ? "これまでの会話: (まだなし)"
+      : "これまでの会話:\n" +
+        opts.history
+          .map((h) => `${h.role === "customer" ? "お客様" : "アシスタント"}: ${h.text}`)
+          .join("\n");
+
+  const ask =
+    opts.mode === "slot"
+      ? `店員が次の項目について聞きたいと指定しました: 「${SLOT_LABELS[opts.slot || ""] || opts.slot}」。この項目をお客様に尋ねる質問を作ってください。`
+      : `店員がお客様に聞きたいこと(日本語): 「${opts.customJa || ""}」。これをお客様向けの自然な質問にしてください。`;
+
+  const payload = `target_lang: ${opts.lang}\n\n${historyBlock}\n\n${ask}`;
+
+  return await callJson<AskQuestionResult>({
+    system: ASK_SYSTEM,
+    contents: payload,
+    maxOutputTokens: 800,
+    temperature: 0.4,
+  });
+}
 
 export interface MediaPart {
   base64: string;
   mimeType: string;
 }
 
-export async function visualConsult(
-  customerWish: string,
-  customerLangHint: string | undefined,
+const VISUAL_BRIEF_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
+お客様から「どんな花の組み合わせ・アレンジが欲しいか」をヒアリングし、後で AI が提案画像を生成するための指示書 (brief) を作ります。
+
+これまでの会話とお客様の最新発話を踏まえ:
+1. お客様の言語を自動検出
+2. 色・雰囲気・用途・贈る相手・予算・込めたい花言葉などを整理し、画像生成に使える日本語の brief を作る (brief_ja)
+3. 関連する花言葉を日本語でまとめる (flower_language_ja)
+4. まだ確認したい点があれば、お客様の言語で 1 つだけ質問する (reply_to_customer に含める)。その日本語訳を follow_up_ja に入れる
+5. 画像生成に十分な情報 (雰囲気と用途が分かる程度) が集まったら is_ready=true。その場合 follow_up_ja は空文字でよい
+
+JSON のみで返答 (前後にテキストやコードフェンスを付けない):
+{
+  "detected_language": "BCP-47",
+  "language_name_ja": "日本語名",
+  "brief_ja": "画像生成用の日本語指示書",
+  "flower_language_ja": "関連する花言葉",
+  "reply_to_customer": "お客様の言語での返答 (確認質問 or 締めの一言)",
+  "follow_up_ja": "確認質問の日本語訳 (なければ空文字)",
+  "is_ready": false
+}`;
+
+export async function visualBrief(
+  history: ConsultTurn[],
+  customerText: string,
+  langHint?: string,
+): Promise<VisualBriefResult> {
+  const historyBlock =
+    history.length === 0
+      ? "これまでの会話: (まだなし)"
+      : "これまでの会話:\n" +
+        history
+          .map((h) => `${h.role === "customer" ? "お客様" : "アシスタント"}: ${h.text}`)
+          .join("\n");
+  const langBlock = langHint ? `お客様の言語(推定): ${langHint}` : "";
+  const payload = [langBlock, historyBlock, `お客様の最新の発話:\n${customerText}`]
+    .filter(Boolean)
+    .join("\n\n");
+
+  return await callJson<VisualBriefResult>({
+    system: VISUAL_BRIEF_SYSTEM,
+    contents: payload,
+    maxOutputTokens: 2000,
+    temperature: 0.5,
+  });
+}
+
+const IMAGE_MODEL = process.env.GEMINI_IMAGE_MODEL || "gemini-2.5-flash-image";
+
+export interface GeneratedImage {
+  base64: string;
+  mimeType: string;
+}
+
+export async function generateProposalImage(
   media: MediaPart[],
-): Promise<VisualResult> {
-  const userText = customerLangHint
-    ? `お客様の言語: ${customerLangHint}\nお客様の希望:\n${customerWish}`
-    : `お客様の希望:\n${customerWish}`;
+  briefText: string,
+): Promise<GeneratedImage> {
+  const prompt =
+    `あなたはプロのフローリストです。以下の写真に写っている「実際に店にある花」だけを使って、` +
+    `お客様の要望に合った美しい花束またはフラワーアレンジメントを 1 つ作り、その完成イメージ写真を生成してください。\n` +
+    `写真に無い花は加えないでください。自然光のスタジオ撮影風、背景はシンプルに。\n\n` +
+    `お客様の要望:\n${briefText}`;
 
   const parts = [
-    { text: userText },
+    { text: prompt },
     ...media.map((m) => ({ inlineData: { mimeType: m.mimeType, data: m.base64 } })),
   ];
 
-  return await callJson<VisualResult>({
-    system: VISUAL_SYSTEM,
+  let res;
+  try {
+    res = await client().models.generateContent({
+      model: IMAGE_MODEL,
+      contents: [{ role: "user", parts }],
+      config: {
+        responseModalities: ["IMAGE", "TEXT"],
+      },
+    });
+  } catch (e) {
+    throw translateSdkError(e);
+  }
+
+  const candidate = (
+    res as unknown as {
+      candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] } }[];
+    }
+  ).candidates?.[0];
+  const imagePart = candidate?.content?.parts?.find((p) => p.inlineData?.data);
+  if (!imagePart?.inlineData?.data) {
+    throw new AiError(
+      `画像を生成できませんでした。モデル「${IMAGE_MODEL}」が画像生成に対応しているか、API キーの権限をご確認ください。`,
+      { code: "no_image" },
+    );
+  }
+  return {
+    base64: imagePart.inlineData.data,
+    mimeType: imagePart.inlineData.mimeType || "image/png",
+  };
+}
+
+const DESCRIBE_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
+AI が生成した「花の組み合わせ提案画像」と、お客様の要望を受け取ります。
+
+1. 画像に写っているアレンジを観察する
+2. お客様の言語で、温かく魅力的な説明文を作る (description_customer)。使われている花とその花言葉に触れる
+3. その日本語訳を作る (description_ja)
+4. 含まれる花の花言葉を日本語でまとめる (flower_meanings_ja)
+
+JSON のみで返答 (前後にテキストやコードフェンスを付けない):
+{
+  "description_customer": "お客様の言語の説明 (花言葉に触れる)",
+  "description_ja": "その日本語訳",
+  "flower_meanings_ja": "使われている花の花言葉 (日本語)"
+}`;
+
+export interface ArrangementDescription {
+  description_customer: string;
+  description_ja: string;
+  flower_meanings_ja: string;
+}
+
+export async function describeArrangement(
+  generated: GeneratedImage,
+  briefText: string,
+  lang: string,
+): Promise<ArrangementDescription> {
+  const parts = [
+    {
+      text: `お客様の言語: ${lang}\nお客様の要望:\n${briefText}\n\n下の画像が提案するアレンジです。`,
+    },
+    { inlineData: { mimeType: generated.mimeType, data: generated.base64 } },
+  ];
+
+  return await callJson<ArrangementDescription>({
+    system: DESCRIBE_SYSTEM,
     contents: [{ role: "user", parts }],
-    maxOutputTokens: 3000,
+    maxOutputTokens: 2000,
     temperature: 0.6,
   });
 }
