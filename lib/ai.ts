@@ -11,6 +11,10 @@ import { CONSULT_SLOTS } from "./types";
 
 const MODEL = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
+// thinkingBudget: 0 is only accepted by the 2.5-flash family. Pro requires a
+// minimum budget and 2.0/1.5 have no thinking config, so we only disable it there.
+const THINKING_DISABLED = /2\.5-flash/.test(MODEL);
+
 let _client: GoogleGenAI | null = null;
 function client(): GoogleGenAI {
   if (_client) return _client;
@@ -397,6 +401,12 @@ async function callJson<T>(args: CallArgs): Promise<T> {
           responseMimeType: "application/json",
           temperature: args.temperature,
           maxOutputTokens: args.maxOutputTokens,
+          // Gemini 2.5 spends "thinking" tokens out of maxOutputTokens before
+          // emitting any text. For these structured extraction/translation
+          // tasks thinking is unnecessary and was exhausting the budget,
+          // truncating the JSON. 0 disables it (only valid on 2.5-flash family;
+          // pro cannot disable it and 2.0 has no thinking).
+          ...(THINKING_DISABLED ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
         },
       });
     } catch (e) {
