@@ -10,6 +10,7 @@ import {
 } from "@/lib/types";
 import { useSpeechRecognition, speak } from "@/lib/speech";
 import {
+  captureVideoFrame,
   compressImage,
   isInAppCameraSupported,
   MAX_VIDEO_SECONDS,
@@ -221,25 +222,41 @@ export default function ShowPage() {
   }
 
   async function generate() {
-    const photos = media.filter((m) => m.kind === "image");
-    if (photos.length === 0) {
-      setError("組み合わせ画像の生成には花の写真が必要です。写真を1枚以上追加してください。");
+    if (media.length === 0) {
+      setError("組み合わせ画像の生成には花の写真または動画が必要です。1つ以上追加してください。");
       return;
     }
     setGenerating(true);
     setError("");
     camera.close();
     try {
-      const totalMb = photos.reduce((s, m) => s + m.file.size, 0) / (1024 * 1024);
+      // Photos go in directly; videos contribute a representative still frame
+      // so the flowers shown in the video are honored in the generation input.
+      const photoFiles: File[] = media.filter((m) => m.kind === "image").map((m) => m.file);
+      const videoMedia = media.filter((m) => m.kind === "video");
+      for (const v of videoMedia) {
+        try {
+          const frame = await captureVideoFrame(v.file);
+          const compressed = await compressImage(frame).catch(() => frame);
+          photoFiles.push(compressed);
+        } catch {
+          /* skip frames we can't extract */
+        }
+      }
+      if (photoFiles.length === 0) {
+        throw new Error("写真または動画から花の画像を取得できませんでした。");
+      }
+
+      const totalMb = photoFiles.reduce((s, f) => s + f.size, 0) / (1024 * 1024);
       if (totalMb > 4) {
         throw new Error(
-          `写真の合計サイズが ${totalMb.toFixed(1)}MB です。上限 (4MB) を超えるため枚数を減らしてください。`,
+          `画像の合計サイズが ${totalMb.toFixed(1)}MB です。上限 (4MB) を超えるため枚数を減らしてください。`,
         );
       }
       const form = new FormData();
       form.append("brief", briefText());
       form.append("lang", lang);
-      photos.forEach((m) => form.append("media", m.file));
+      photoFiles.forEach((f) => form.append("media", f));
       const res = await fetch("/api/visual/generate", { method: "POST", body: form });
 
       if (res.status === 413) {
@@ -430,9 +447,9 @@ export default function ShowPage() {
       {step === "capture" && (
         <div className={styles.card}>
           <p className={styles.note}>
-            店内の花を撮影 / アップロードしてください。複数枚の花を組み合わせた提案画像を生成します。
+            店内の花を撮影 / アップロードしてください。複数の花を組み合わせた提案画像を生成します。
             <br />
-            （画像生成の入力に使われるのは写真です）
+            写真・動画どちらも使えます（動画は代表フレームを使用）。生成画像には、写したお花だけが使われます。
           </p>
 
           {cameraSupported && (
@@ -592,9 +609,18 @@ export default function ShowPage() {
             </button>
           </div>
 
+          {!result.verified && result.unverified_note_ja && (
+            <p className={styles.warn}>⚠️ {result.unverified_note_ja}</p>
+          )}
+
           <details className={styles.staffBox} open>
             <summary>店員向け（日本語）</summary>
             <p>{result.description_ja}</p>
+            {result.used_flowers_ja && (
+              <p className={styles.flowerLang}>
+                📷 写真から使用した花: {result.used_flowers_ja}
+              </p>
+            )}
             {result.flower_meanings_ja && (
               <p className={styles.flowerLang}>🌸 花言葉: {result.flower_meanings_ja}</p>
             )}

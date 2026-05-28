@@ -63,6 +63,9 @@ export interface ProposalResult {
   description_customer: string;
   description_ja: string;
   flower_meanings_ja: string;
+  used_flowers_ja: string;
+  verified: boolean;
+  unverified_note_ja: string;
 }
 
 export interface InterpretResult {

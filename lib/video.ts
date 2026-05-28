@@ -319,6 +319,64 @@ function loadImage(file: File): Promise<HTMLImageElement> {
   });
 }
 
+/**
+ * Grab a representative still frame from a video so its flowers can be used as
+ * input to the (image-only) generation/identification step. Returns a JPEG File.
+ */
+export function captureVideoFrame(file: File): Promise<File> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    v.src = url;
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+    const cleanup = () => URL.revokeObjectURL(url);
+    v.onloadedmetadata = () => {
+      const target = Math.min(1, (v.duration || 2) / 2);
+      const seek = () => {
+        try {
+          v.currentTime = target;
+        } catch {
+          /* ignore */
+        }
+      };
+      if (v.readyState >= 2) seek();
+      else v.oncanplay = seek;
+    };
+    v.onseeked = () => {
+      const w = v.videoWidth || 1280;
+      const h = v.videoHeight || 720;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) {
+        cleanup();
+        reject(new Error("動画フレームを取得できませんでした"));
+        return;
+      }
+      ctx.drawImage(v, 0, 0, w, h);
+      canvas.toBlob(
+        (blob) => {
+          cleanup();
+          if (!blob) {
+            reject(new Error("動画フレームを取得できませんでした"));
+            return;
+          }
+          resolve(new File([blob], `frame-${Date.now()}.jpg`, { type: "image/jpeg" }));
+        },
+        "image/jpeg",
+        0.85,
+      );
+    };
+    v.onerror = () => {
+      cleanup();
+      reject(new Error("動画を読み込めませんでした"));
+    };
+  });
+}
+
 export function videoDuration(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);

@@ -224,21 +224,55 @@ export interface GeneratedImage {
   mimeType: string;
 }
 
+const IDENTIFY_SYSTEM = `あなたは花の identification の専門家です。
+提供された写真・動画フレームに「はっきり写っている花・葉・グリーン」だけを挙げてください。
+
+ルール:
+- 主役として写っているものだけを挙げる。背景にぼやけて写っているもの、判別できないものは含めない。
+- 推測で花を足さない。確実に判別できるものだけ。
+
+JSON のみで返答 (前後にテキストやコードフェンスを付けない):
+{
+  "flowers": [{ "ja": "和名", "en": "English name", "color": "色(日本語)" }],
+  "list_text": "店員向けの一覧 (例: 赤いバラ、白いカスミソウ、ユーカリ)"
+}`;
+
+export interface IdentifiedFlowers {
+  flowers: { ja: string; en: string; color: string }[];
+  list_text: string;
+}
+
+export async function identifyFlowers(media: MediaPart[]): Promise<IdentifiedFlowers> {
+  const parts = [
+    { text: "次の画像に実際に写っている花・葉・グリーンを挙げてください。" },
+    ...media.map((m) => ({ inlineData: { mimeType: m.mimeType, data: m.base64 } })),
+  ];
+  return await callJson<IdentifiedFlowers>({
+    system: IDENTIFY_SYSTEM,
+    contents: [{ role: "user", parts }],
+    maxOutputTokens: 1500,
+    temperature: 0.2,
+  });
+}
+
 export async function generateProposalImage(
   media: MediaPart[],
   briefText: string,
+  allowedListText: string,
+  removeFeedback?: string,
 ): Promise<GeneratedImage> {
   const prompt =
-    `あなたはプロのフローリストです。提供された写真に実際に写っている花だけを組み合わせて、` +
+    `あなたはプロのフローリストです。下記の「使用可能な花のリスト」にある花だけを組み合わせて、` +
     `お客様の要望に合った美しい花束またはフラワーアレンジメントを 1 つ作り、その完成イメージ写真を生成してください。\n\n` +
+    `# 使用可能な花のリスト (これ以外は絶対に使わない)\n${allowedListText}\n\n` +
     `# 厳守事項 (最重要)\n` +
-    `- 使ってよいのは、提供写真に「はっきり写っている花・葉・グリーン」だけです。\n` +
-    `- 写真に写っていない花・植物・装飾を、想像で追加・置換・補完してはいけません。\n` +
-    `- 花の種類・色・品種は写真のとおりに保ち、本数や配置だけを調整してください。\n` +
-    `- 例: 写真に赤いバラとカスミソウしか無ければ、生成画像も赤いバラとカスミソウのみで構成すること。\n` +
-    `- 迷った場合は、花の種類を増やすのではなく、写真にある花だけで上品にまとめてください。\n\n` +
-    `# スタイル\n` +
-    `- 自然光のスタジオ撮影風、背景はシンプルで無地に近いもの。\n\n` +
+    `- 上のリストにある花・葉・グリーンだけを使うこと。リストに無い花・植物・装飾は、たとえ見栄えが良くなるとしても絶対に追加・置換・補完しないこと。\n` +
+    `- 添付写真は実物の見た目の参考です。花の種類・色・品種は写真とリストのとおりに保ち、本数や配置だけを調整すること。\n` +
+    `- 迷った場合は、花の種類を増やさず、リストにある花だけで上品にまとめること。\n` +
+    (removeFeedback
+      ? `- 前回の生成では「${removeFeedback}」がリスト外なのに含まれていました。今回は必ず取り除くこと。\n`
+      : "") +
+    `\n# スタイル\n- 自然光のスタジオ撮影風、背景はシンプルで無地に近いもの。\n\n` +
     `# お客様の要望\n${briefText}`;
 
   const parts = [
@@ -275,6 +309,40 @@ export async function generateProposalImage(
     base64: imagePart.inlineData.data,
     mimeType: imagePart.inlineData.mimeType || "image/png",
   };
+}
+
+const VERIFY_SYSTEM = `あなたは品質チェック担当です。
+生成された花のアレンジ画像が、許可リストの花だけで構成されているかを確認します。
+
+ルール:
+- 花の「種類」だけを見ます。色の濃淡や本数の違いは無視してください。
+- 許可リストに無い花の種類が明確に含まれている場合のみ ok=false とし、その花を extra_ja に挙げます。
+- 判断に迷う程度のものは ok=true とします。
+
+JSON のみで返答 (前後にテキストやコードフェンスを付けない):
+{ "ok": true, "extra_ja": "リスト外の花 (なければ空文字)" }`;
+
+export interface VerifyResult {
+  ok: boolean;
+  extra_ja: string;
+}
+
+export async function verifyArrangement(
+  generated: GeneratedImage,
+  allowedListText: string,
+): Promise<VerifyResult> {
+  const parts = [
+    {
+      text: `許可リスト: ${allowedListText}\n\n下の画像に、許可リスト以外の花の種類が含まれていないか確認してください。`,
+    },
+    { inlineData: { mimeType: generated.mimeType, data: generated.base64 } },
+  ];
+  return await callJson<VerifyResult>({
+    system: VERIFY_SYSTEM,
+    contents: [{ role: "user", parts }],
+    maxOutputTokens: 800,
+    temperature: 0,
+  });
 }
 
 const DESCRIBE_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
