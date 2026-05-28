@@ -47,21 +47,26 @@ const SLOT_DESCRIPTIONS = CONSULT_SLOTS.map(
 const CONSULT_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
 お客様と何度かやり取りしながら、花を見繕うために必要な情報を集めます。
 
+## 最重要ルール: 言語
+- 入力に target_lang が与えられます。これがお客様の言語です。
+- お客様向けのフィールド (reply_to_customer, next_question_to_customer) は、お客様が何語で書いてきても、**必ず target_lang の言語で**書いてください。日本語で書いてはいけません (target_lang が ja の場合を除く)。
+- 店員向けのフィールド (cumulative_summary_ja, next_question_to_customer_ja, staff_note_ja) は日本語で書いてください。
+
 ## 集めたい情報 (slots)
 ${SLOT_DESCRIPTIONS}
 
 ## あなたの仕事
 これまでの会話の履歴とお客様の最新の発話を受け取り、次を行う:
-1. お客様の発話の言語を自動検出 (BCP-47)
+1. お客様の発話の言語を参考に detected_language を埋める (ただし出力言語は上記ルールに従い target_lang を優先)
 2. 会話全体から各 slot に該当する情報を抽出し、累積した keywords を更新する (過去のターンで分かったことを引き継ぐ)
 3. filled_slots と missing_slots を計算する
 4. 必須 slot (recipient, occasion, budget) が全部埋まり、かつお客様が「もう十分」というニュアンスを示したら is_ready=true。それ以外は false
-5. is_ready が false なら、missing_slots の中で最も自然に次に聞ける項目を 1 つ選び、お客様の言語の質問 (next_question_to_customer) と、その日本語訳 (next_question_to_customer_ja) を作る
+5. is_ready が false なら、missing_slots の中で最も自然に次に聞ける項目を 1 つ選び、target_lang の質問 (next_question_to_customer) と、その日本語訳 (next_question_to_customer_ja) を作る
    - 質問は 1 つだけ。たくさん聞かない
    - 既に分かっている内容を踏まえて自然な会話の流れにする
    - 必須項目を優先するが、文脈に応じて柔軟に
 6. is_ready が true なら next_question_to_customer と next_question_to_customer_ja はどちらも null
-7. reply_to_customer はお客様の言語で「ありがとうございます。〜について教えていただけますか？」のように、共感の一言 + 次の質問を組み合わせる (is_ready=true なら締めの一言)
+7. reply_to_customer は target_lang で「ありがとうございます。〜について教えていただけますか？」のように、共感の一言 + 次の質問を組み合わせる (is_ready=true なら締めの一言)
 8. cumulative_summary_ja は店員向けに会話全体から分かったことを日本語で簡潔にまとめる
 9. staff_note_ja には、店員に補足したいニュアンスや注意点 (任意)
 
@@ -70,18 +75,18 @@ JSON のみ (前後にテキストやコードフェンスを付けない):
 {
   "detected_language": "BCP-47",
   "language_name_ja": "日本語名",
-  "cumulative_summary_ja": "店員向け要約",
+  "cumulative_summary_ja": "店員向け要約 (日本語)",
   "keywords": {
     "recipient": "...", "occasion": "...", "budget": "...",
     "color": ["..."], "flower_language": ["..."], "style": "..."
   },
   "filled_slots": ["recipient", "occasion"],
   "missing_slots": ["budget", "color"],
-  "reply_to_customer": "お客様の言語で",
-  "next_question_to_customer": "お客様の言語で次に聞きたい質問 (is_ready=true なら null)",
+  "reply_to_customer": "target_lang の言語で (日本語にしない)",
+  "next_question_to_customer": "target_lang の言語で次に聞きたい質問 (is_ready=true なら null)",
   "next_question_to_customer_ja": "上記質問の日本語訳 (is_ready=true なら null)",
   "is_ready": false,
-  "staff_note_ja": "店員向けメモ (任意)"
+  "staff_note_ja": "店員向けメモ (日本語, 任意)"
 }`;
 
 export async function consultChat(
@@ -96,7 +101,7 @@ export async function consultChat(
         history
           .map((h) => `${h.role === "customer" ? "お客様" : "アシスタント"}: ${h.text}`)
           .join("\n");
-  const langBlock = langHint ? `お客様の言語(推定): ${langHint}` : "";
+  const langBlock = `target_lang: ${langHint || "en"}`;
   const payload = [langBlock, historyBlock, `お客様の最新の発話:\n${customerText}`]
     .filter(Boolean)
     .join("\n\n");
@@ -164,11 +169,16 @@ export interface MediaPart {
 const VISUAL_BRIEF_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
 お客様から「どんな花の組み合わせ・アレンジが欲しいか」をヒアリングし、後で AI が提案画像を生成するための指示書 (brief) を作ります。
 
+## 最重要ルール: 言語
+- 入力に target_lang が与えられます。これがお客様の言語です。
+- reply_to_customer は、お客様が何語で書いてきても、**必ず target_lang の言語で**書いてください (target_lang が ja の場合を除き、日本語にしない)。
+- brief_ja, flower_language_ja, follow_up_ja は日本語で書いてください。
+
 これまでの会話とお客様の最新発話を踏まえ:
-1. お客様の言語を自動検出
+1. detected_language を埋める (出力言語は上記ルールに従う)
 2. 色・雰囲気・用途・贈る相手・予算・込めたい花言葉などを整理し、画像生成に使える日本語の brief を作る (brief_ja)
 3. 関連する花言葉を日本語でまとめる (flower_language_ja)
-4. まだ確認したい点があれば、お客様の言語で 1 つだけ質問する (reply_to_customer に含める)。その日本語訳を follow_up_ja に入れる
+4. まだ確認したい点があれば、target_lang で 1 つだけ質問する (reply_to_customer に含める)。その日本語訳を follow_up_ja に入れる
 5. 画像生成に十分な情報 (雰囲気と用途が分かる程度) が集まったら is_ready=true。その場合 follow_up_ja は空文字でよい
 
 JSON のみで返答 (前後にテキストやコードフェンスを付けない):
@@ -176,8 +186,8 @@ JSON のみで返答 (前後にテキストやコードフェンスを付けな�
   "detected_language": "BCP-47",
   "language_name_ja": "日本語名",
   "brief_ja": "画像生成用の日本語指示書",
-  "flower_language_ja": "関連する花言葉",
-  "reply_to_customer": "お客様の言語での返答 (確認質問 or 締めの一言)",
+  "flower_language_ja": "関連する花言葉 (日本語)",
+  "reply_to_customer": "target_lang の言語での返答 (日本語にしない)",
   "follow_up_ja": "確認質問の日本語訳 (なければ空文字)",
   "is_ready": false
 }`;
@@ -194,7 +204,7 @@ export async function visualBrief(
         history
           .map((h) => `${h.role === "customer" ? "お客様" : "アシスタント"}: ${h.text}`)
           .join("\n");
-  const langBlock = langHint ? `お客様の言語(推定): ${langHint}` : "";
+  const langBlock = `target_lang: ${langHint || "en"}`;
   const payload = [langBlock, historyBlock, `お客様の最新の発話:\n${customerText}`]
     .filter(Boolean)
     .join("\n\n");
