@@ -382,25 +382,6 @@
   white-space: nowrap;
 }
 
-.saidBox {
-  margin-top: 10px;
-  padding: 10px 12px;
-  background: var(--accent-light);
-  border-radius: 8px;
-}
-
-.saidCustomer {
-  font-size: 1.05rem;
-  display: flex;
-  align-items: center;
-}
-
-.saidJa {
-  color: var(--muted);
-  font-size: 0.85rem;
-  margin-top: 4px;
-}
-
 .warn {
   background: #fff4e5;
   border: 1px solid #ffcc80;

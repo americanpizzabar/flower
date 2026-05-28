@@ -49,7 +49,6 @@ export default function ShowPage() {
   const [trimming, setTrimming] = useState(false);
   const [cameraSupported, setCameraSupported] = useState(false);
   const [captureComment, setCaptureComment] = useState("");
-  const [captureSaid, setCaptureSaid] = useState<{ customer: string; ja: string } | null>(null);
   const [commenting, setCommenting] = useState(false);
 
   // Generate
@@ -147,7 +146,8 @@ export default function ShowPage() {
     }
   }
 
-  // Staff says something to the customer during capture (Japanese -> customer language, spoken)
+  // Staff says something to the customer during capture (Japanese -> customer language,
+  // spoken and recorded in the conversation so it feeds the generation brief).
   async function sayInCapture() {
     const text = captureComment.trim();
     if (!text || commenting) return;
@@ -166,7 +166,7 @@ export default function ShowPage() {
       }
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "失敗しました");
-      setCaptureSaid({ customer: data.translation, ja: text });
+      setTurns((prev) => [...prev, { role: "assistant", text: data.translation }]);
       setCaptureComment("");
       speak(data.translation, speechLang);
     } catch (e) {
@@ -215,10 +215,18 @@ export default function ShowPage() {
   }
 
   function briefText(): string {
-    if (!brief) return turns.map((t) => t.text).join(" / ");
-    return [brief.brief_ja, brief.flower_language_ja ? `花言葉: ${brief.flower_language_ja}` : ""]
-      .filter(Boolean)
-      .join("\n");
+    const parts: string[] = [];
+    if (brief) {
+      if (brief.brief_ja) parts.push(brief.brief_ja);
+      if (brief.flower_language_ja) parts.push(`花言葉: ${brief.flower_language_ja}`);
+    }
+    if (turns.length > 0) {
+      const convo = turns
+        .map((t) => `${t.role === "customer" ? "お客様" : "店員"}: ${t.text}`)
+        .join("\n");
+      parts.push(`これまでのやりとり:\n${convo}`);
+    }
+    return parts.length > 0 ? parts.join("\n\n") : turns.map((t) => t.text).join(" / ");
   }
 
   async function generate() {
@@ -286,7 +294,6 @@ export default function ShowPage() {
     setInput("");
     setStaffAsk("");
     setCaptureComment("");
-    setCaptureSaid(null);
     setResult(null);
     setError("");
     camera.close();
@@ -307,6 +314,34 @@ export default function ShowPage() {
       fileInputRef.current.setAttribute("capture", "environment");
       fileInputRef.current.click();
     }
+  }
+
+  function renderChat() {
+    if (turns.length === 0) return null;
+    return (
+      <div className={styles.chat}>
+        {turns.map((t, i) => (
+          <div
+            key={i}
+            className={t.role === "customer" ? styles.customerRow : styles.assistantRow}
+          >
+            <div className={styles.bubble}>
+              <div className={styles.bubbleRole}>{t.role === "customer" ? "お客様" : "AI / 店員"}</div>
+              <div>{t.text}</div>
+              {t.role === "assistant" && (
+                <button
+                  className="ghost"
+                  style={{ marginTop: 6, padding: "4px 10px", fontSize: "0.85rem" }}
+                  onClick={() => speak(t.text, speechLang)}
+                >
+                  🔊 読み上げ
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
   }
 
   return (
@@ -343,32 +378,7 @@ export default function ShowPage() {
             </>
           )}
 
-          {turns.length > 0 && (
-            <div className={styles.chat}>
-              {turns.map((t, i) => (
-                <div
-                  key={i}
-                  className={t.role === "customer" ? styles.customerRow : styles.assistantRow}
-                >
-                  <div className={styles.bubble}>
-                    <div className={styles.bubbleRole}>
-                      {t.role === "customer" ? "お客様" : "AI"}
-                    </div>
-                    <div>{t.text}</div>
-                    {t.role === "assistant" && (
-                      <button
-                        className="ghost"
-                        style={{ marginTop: 6, padding: "4px 10px", fontSize: "0.85rem" }}
-                        onClick={() => speak(t.text, speechLang)}
-                      >
-                        🔊 読み上げ
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+          {renderChat()}
 
           <label className={styles.mt}>
             {turns.length === 0 ? "お客様の要望（花言葉や雰囲気など）" : "お客様の返事"}
@@ -533,13 +543,41 @@ export default function ShowPage() {
 
           <div className={styles.askBox}>
             <div className={styles.askLabel}>
-              撮影しながらお客様へ一言（日本語で入力 → お客様の言語で読み上げます）
+              やりとり（この内容も提案画像の要件に反映されます）
             </div>
-            <div className={styles.customAskRow}>
+
+            {renderChat()}
+
+            {/* Customer input (language carried over from the previous screen) */}
+            <label className={styles.mt}>お客様の入力 / 音声</label>
+            <textarea
+              value={input + (speech.interim ? ` ${speech.interim}` : "")}
+              onChange={(e) => setInput(e.target.value)}
+              rows={2}
+              placeholder="お客様: 例) I'd prefer the lighter pink ones..."
+            />
+            <div className={styles.actions}>
+              {speech.supported &&
+                (speech.listening ? (
+                  <button className="ghost" onClick={speech.stop}>
+                    ⏹ 停止
+                  </button>
+                ) : (
+                  <button className="ghost" onClick={speech.start}>
+                    🎤 お客様が音声入力
+                  </button>
+                ))}
+              <button onClick={sendHearing} disabled={hearLoading || !input.trim()}>
+                {hearLoading ? "整理中..." : "お客様の発言を送信"}
+              </button>
+            </div>
+
+            {/* Staff comment (Japanese -> customer language) */}
+            <div className={styles.customAskRow} style={{ marginTop: 8 }}>
               <input
                 value={captureComment}
                 onChange={(e) => setCaptureComment(e.target.value)}
-                placeholder="例: こちらのバラはいかがですか？ / どの色がお好みですか？"
+                placeholder="店員から一言（日本語）例: こちらのバラはいかがですか？"
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && captureComment.trim()) {
                     e.preventDefault();
@@ -551,21 +589,6 @@ export default function ShowPage() {
                 {commenting ? "..." : "お客様へ"}
               </button>
             </div>
-            {captureSaid && (
-              <div className={styles.saidBox}>
-                <div className={styles.saidCustomer}>
-                  🗣️ {captureSaid.customer}
-                  <button
-                    className="ghost"
-                    style={{ marginLeft: 8, padding: "2px 8px", fontSize: "0.8rem" }}
-                    onClick={() => speak(captureSaid.customer, speechLang)}
-                  >
-                    🔊
-                  </button>
-                </div>
-                <div className={styles.saidJa}>（{captureSaid.ja}）</div>
-              </div>
-            )}
           </div>
 
           {error && <p className={styles.error}>{error}</p>}
