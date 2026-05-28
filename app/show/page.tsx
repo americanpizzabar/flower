@@ -40,11 +40,16 @@ export default function ShowPage() {
   const [input, setInput] = useState("");
   const [brief, setBrief] = useState<VisualBriefResult | null>(null);
   const [hearLoading, setHearLoading] = useState(false);
+  const [staffAsk, setStaffAsk] = useState("");
+  const [asking, setAsking] = useState(false);
 
   // Capture
   const [media, setMedia] = useState<MediaFile[]>([]);
   const [trimming, setTrimming] = useState(false);
   const [cameraSupported, setCameraSupported] = useState(false);
+  const [captureComment, setCaptureComment] = useState("");
+  const [captureSaid, setCaptureSaid] = useState<{ customer: string; ja: string } | null>(null);
+  const [commenting, setCommenting] = useState(false);
 
   // Generate
   const [generating, setGenerating] = useState(false);
@@ -108,6 +113,65 @@ export default function ShowPage() {
       setInput(text);
     } finally {
       setHearLoading(false);
+    }
+  }
+
+  // Staff asks a question during hearing (Japanese -> customer language, added to chat)
+  async function askInHearing() {
+    const customJa = staffAsk.trim();
+    if (!customJa || asking) return;
+    setError("");
+    setAsking(true);
+    try {
+      const history: ConsultTurn[] = turns.map((t) => ({ role: t.role, text: t.text }));
+      const res = await fetch("/api/consult/ask", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode: "custom", custom_ja: customJa, lang, history }),
+      });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        const t = await res.text();
+        throw new Error(`サーバーから予期しない応答 (HTTP ${res.status}): ${t.slice(0, 120)}`);
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "失敗しました");
+      setTurns((prev) => [...prev, { role: "assistant", text: data.question_customer_lang }]);
+      setStaffAsk("");
+      speak(data.question_customer_lang, speechLang);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "通信エラー");
+    } finally {
+      setAsking(false);
+    }
+  }
+
+  // Staff says something to the customer during capture (Japanese -> customer language, spoken)
+  async function sayInCapture() {
+    const text = captureComment.trim();
+    if (!text || commenting) return;
+    setError("");
+    setCommenting(true);
+    try {
+      const res = await fetch("/api/interpret", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, source_hint: "ja", target_lang: lang }),
+      });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        const t = await res.text();
+        throw new Error(`サーバーから予期しない応答 (HTTP ${res.status}): ${t.slice(0, 120)}`);
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "失敗しました");
+      setCaptureSaid({ customer: data.translation, ja: text });
+      setCaptureComment("");
+      speak(data.translation, speechLang);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "通信エラー");
+    } finally {
+      setCommenting(false);
     }
   }
 
@@ -203,6 +267,9 @@ export default function ShowPage() {
     setTurns([]);
     setBrief(null);
     setInput("");
+    setStaffAsk("");
+    setCaptureComment("");
+    setCaptureSaid(null);
     setResult(null);
     setError("");
     camera.close();
@@ -311,6 +378,30 @@ export default function ShowPage() {
               {hearLoading ? "整理中..." : "送信"}
             </button>
           </div>
+
+          {turns.length > 0 && (
+            <div className={styles.askBox}>
+              <div className={styles.askLabel}>
+                店員さんから質問・コメント（日本語で入力 → お客様の言語に翻訳して伝えます）
+              </div>
+              <div className={styles.customAskRow}>
+                <input
+                  value={staffAsk}
+                  onChange={(e) => setStaffAsk(e.target.value)}
+                  placeholder="例: ご予算はどのくらいですか？ / 季節のお花もおすすめできます"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && staffAsk.trim()) {
+                      e.preventDefault();
+                      askInHearing();
+                    }
+                  }}
+                />
+                <button onClick={askInHearing} disabled={asking || !staffAsk.trim()}>
+                  {asking ? "..." : "お客様へ"}
+                </button>
+              </div>
+            </div>
+          )}
 
           {brief && (
             <div className={styles.briefBox}>
@@ -422,6 +513,43 @@ export default function ShowPage() {
               ))}
             </div>
           )}
+
+          <div className={styles.askBox}>
+            <div className={styles.askLabel}>
+              撮影しながらお客様へ一言（日本語で入力 → お客様の言語で読み上げます）
+            </div>
+            <div className={styles.customAskRow}>
+              <input
+                value={captureComment}
+                onChange={(e) => setCaptureComment(e.target.value)}
+                placeholder="例: こちらのバラはいかがですか？ / どの色がお好みですか？"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && captureComment.trim()) {
+                    e.preventDefault();
+                    sayInCapture();
+                  }
+                }}
+              />
+              <button onClick={sayInCapture} disabled={commenting || !captureComment.trim()}>
+                {commenting ? "..." : "お客様へ"}
+              </button>
+            </div>
+            {captureSaid && (
+              <div className={styles.saidBox}>
+                <div className={styles.saidCustomer}>
+                  🗣️ {captureSaid.customer}
+                  <button
+                    className="ghost"
+                    style={{ marginLeft: 8, padding: "2px 8px", fontSize: "0.8rem" }}
+                    onClick={() => speak(captureSaid.customer, speechLang)}
+                  >
+                    🔊
+                  </button>
+                </div>
+                <div className={styles.saidJa}>（{captureSaid.ja}）</div>
+              </div>
+            )}
+          </div>
 
           {error && <p className={styles.error}>{error}</p>}
 

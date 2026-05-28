@@ -353,3 +353,50 @@
   object-fit: contain;
   background: var(--bg);
 }
+
+/* Staff comment / question box */
+.askBox {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.askLabel {
+  font-size: 0.85rem;
+  color: var(--accent-dark);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.customAskRow {
+  display: flex;
+  gap: 8px;
+}
+
+.customAskRow input {
+  flex: 1;
+}
+
+.customAskRow button {
+  white-space: nowrap;
+}
+
+.saidBox {
+  margin-top: 10px;
+  padding: 10px 12px;
+  background: var(--accent-light);
+  border-radius: 8px;
+}
+
+.saidCustomer {
+  font-size: 1.05rem;
+  display: flex;
+  align-items: center;
+}
+
+.saidJa {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin-top: 4px;
+}

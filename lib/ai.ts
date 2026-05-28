@@ -229,10 +229,17 @@ export async function generateProposalImage(
   briefText: string,
 ): Promise<GeneratedImage> {
   const prompt =
-    `あなたはプロのフローリストです。以下の写真に写っている「実際に店にある花」だけを使って、` +
-    `お客様の要望に合った美しい花束またはフラワーアレンジメントを 1 つ作り、その完成イメージ写真を生成してください。\n` +
-    `写真に無い花は加えないでください。自然光のスタジオ撮影風、背景はシンプルに。\n\n` +
-    `お客様の要望:\n${briefText}`;
+    `あなたはプロのフローリストです。提供された写真に実際に写っている花だけを組み合わせて、` +
+    `お客様の要望に合った美しい花束またはフラワーアレンジメントを 1 つ作り、その完成イメージ写真を生成してください。\n\n` +
+    `# 厳守事項 (最重要)\n` +
+    `- 使ってよいのは、提供写真に「はっきり写っている花・葉・グリーン」だけです。\n` +
+    `- 写真に写っていない花・植物・装飾を、想像で追加・置換・補完してはいけません。\n` +
+    `- 花の種類・色・品種は写真のとおりに保ち、本数や配置だけを調整してください。\n` +
+    `- 例: 写真に赤いバラとカスミソウしか無ければ、生成画像も赤いバラとカスミソウのみで構成すること。\n` +
+    `- 迷った場合は、花の種類を増やすのではなく、写真にある花だけで上品にまとめてください。\n\n` +
+    `# スタイル\n` +
+    `- 自然光のスタジオ撮影風、背景はシンプルで無地に近いもの。\n\n` +
+    `# お客様の要望\n${briefText}`;
 
   const parts = [
     { text: prompt },
@@ -271,16 +278,21 @@ export async function generateProposalImage(
 }
 
 const DESCRIBE_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
-AI が生成した「花の組み合わせ提案画像」と、お客様の要望を受け取ります。
+AI が生成した「花の組み合わせ提案画像」と、お客様の要望 (target_lang 付き) を受け取ります。
 
-1. 画像に写っているアレンジを観察する
-2. お客様の言語で、温かく魅力的な説明文を作る (description_customer)。使われている花とその花言葉に触れる
-3. その日本語訳を作る (description_ja)
-4. 含まれる花の花言葉を日本語でまとめる (flower_meanings_ja)
+## 最重要ルール: 言語
+- description_customer は必ず target_lang の言語で書く (target_lang が ja の場合を除き日本語にしない)。
+- description_ja と flower_meanings_ja は日本語で書く。
+
+## 手順
+1. 画像に実際に写っている花だけを観察する (写っていない花を推測で挙げない)
+2. description_customer: target_lang で、温かく魅力的な説明文を作る。実際に使われている花とその花言葉に触れる
+3. description_ja: その日本語訳
+4. flower_meanings_ja: 画像に含まれる花の花言葉を日本語でまとめる
 
 JSON のみで返答 (前後にテキストやコードフェンスを付けない):
 {
-  "description_customer": "お客様の言語の説明 (花言葉に触れる)",
+  "description_customer": "target_lang の説明 (花言葉に触れる)",
   "description_ja": "その日本語訳",
   "flower_meanings_ja": "使われている花の花言葉 (日本語)"
 }`;
@@ -298,7 +310,7 @@ export async function describeArrangement(
 ): Promise<ArrangementDescription> {
   const parts = [
     {
-      text: `お客様の言語: ${lang}\nお客様の要望:\n${briefText}\n\n下の画像が提案するアレンジです。`,
+      text: `target_lang: ${lang}\nお客様の要望:\n${briefText}\n\n下の画像が提案するアレンジです。`,
     },
     { inlineData: { mimeType: generated.mimeType, data: generated.base64 } },
   ];
