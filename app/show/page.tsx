@@ -652,6 +652,43 @@ export default function ShowPage() {
             )}
           </details>
 
+          {/* Adjustment conversation: staff and customer can each add requests,
+              then regenerate so the new image reflects them. */}
+          <div className={styles.askBox}>
+            <div className={styles.askLabel}>
+              ✏️ 修正のやりとり（ここで伺った内容は「修正して再生成」に反映されます）
+            </div>
+
+            {renderChat()}
+
+            <label className={styles.mt}>お客様の入力 / 音声</label>
+            <textarea
+              value={input + (speech.interim ? ` ${speech.interim}` : "")}
+              onChange={(e) => setInput(e.target.value)}
+              rows={2}
+              placeholder="お客様: 例) Could you make it bigger / add more pink?"
+            />
+            {renderBigButtons(sendHearing)}
+
+            {/* Staff comment (Japanese -> customer language, spoken + recorded) */}
+            <div className={styles.customAskRow} style={{ marginTop: 8 }}>
+              <input
+                value={captureComment}
+                onChange={(e) => setCaptureComment(e.target.value)}
+                placeholder="店員から一言（日本語）例: 白いお花を増やしましょうか？"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && captureComment.trim()) {
+                    e.preventDefault();
+                    sayInCapture();
+                  }
+                }}
+              />
+              <button onClick={sayInCapture} disabled={commenting || !captureComment.trim()}>
+                {commenting ? "..." : "お客様へ"}
+              </button>
+            </div>
+          </div>
+
           {error && <p className={styles.error}>{error}</p>}
 
           <div className={styles.bottomActions}>
@@ -659,7 +696,7 @@ export default function ShowPage() {
               ← 花を撮り直す
             </button>
             <button className="ghost" onClick={generate} disabled={generating}>
-              {generating ? "生成中..." : "🔁 別の組み合わせを生成"}
+              {generating ? "生成中..." : "🔁 修正して再生成"}
             </button>
             <button onClick={reset}>最初から</button>
           </div>

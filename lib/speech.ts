@@ -59,6 +59,12 @@ export function useSpeechRecognition(opts: {
   const finalTextRef = useRef("");
   const onFinalRef = useRef(opts.onFinal);
   const onErrorRef = useRef(opts.onError);
+  // A long-lived microphone stream. Once permission is granted we keep it open
+  // so the OS microphone stays "warm". The very first SpeechRecognition session
+  // otherwise has to cold-start the audio pipeline, and the opening words are
+  // captured before it is ready — which is why only the first utterance was lost.
+  const micStreamRef = useRef<MediaStream | null>(null);
+  const stoppingRef = useRef(false);
 
   useEffect(() => {
     onFinalRef.current = opts.onFinal;
@@ -69,9 +75,17 @@ export function useSpeechRecognition(opts: {
     setSupported(getRecognitionCtor() !== null);
   }, []);
 
-  // Tracks whether we've already obtained mic permission this session, so we
-  // only pay the getUserMedia warm-up cost on the very first start().
-  const micReadyRef = useRef(false);
+  useEffect(() => {
+    return () => {
+      try {
+        recRef.current?.abort();
+      } catch {
+        /* ignore */
+      }
+      micStreamRef.current?.getTracks().forEach((t) => t.stop());
+      micStreamRef.current = null;
+    };
+  }, []);
 
   const beginRecognition = useCallback(() => {
     if (recRef.current) {
@@ -89,9 +103,12 @@ export function useSpeechRecognition(opts: {
     }
     const rec = new Ctor();
     rec.lang = opts.lang;
-    rec.continuous = false;
+    // Continuous keeps the session open until the user taps stop, so a short
+    // opening phrase is not cut off by the engine ending the session early.
+    rec.continuous = true;
     rec.interimResults = true;
     finalTextRef.current = "";
+    stoppingRef.current = false;
 
     rec.onresult = (e) => {
       let interimText = "";
@@ -107,14 +124,23 @@ export function useSpeechRecognition(opts: {
     };
 
     rec.onerror = (e) => {
-      setListening(false);
-      setInterim("");
       if (e.error && e.error !== "no-speech" && e.error !== "aborted") {
         onErrorRef.current?.(e.error);
       }
     };
 
     rec.onend = () => {
+      // In continuous mode some browsers end the session on a long silence even
+      // though the user hasn't tapped stop. Restart transparently so we keep
+      // listening; only emit the final text once the user actually stops.
+      if (!stoppingRef.current && recRef.current === rec) {
+        try {
+          rec.start();
+          return;
+        } catch {
+          /* fall through to finalize */
+        }
+      }
       setListening(false);
       setInterim("");
       const finalText = finalTextRef.current.trim();
@@ -133,12 +159,10 @@ export function useSpeechRecognition(opts: {
   }, [opts.lang]);
 
   const start = useCallback(() => {
-    // On the very first use, the browser shows a microphone-permission prompt.
-    // If we start SpeechRecognition straight away, that first session is often
-    // discarded while the user is still deciding, so the opening utterance is
-    // never recognized. Pre-warm the permission with getUserMedia first, then
-    // begin recognition — subsequent starts skip this and begin immediately.
-    if (micReadyRef.current || !navigator.mediaDevices?.getUserMedia) {
+    // Acquire (and keep) the microphone before starting recognition. This both
+    // surfaces the permission prompt up front and keeps the mic warm so the
+    // first utterance is captured. Subsequent starts reuse the warm stream.
+    if (micStreamRef.current || !navigator.mediaDevices?.getUserMedia) {
       beginRecognition();
       return;
     }
@@ -146,8 +170,7 @@ export function useSpeechRecognition(opts: {
     navigator.mediaDevices
       .getUserMedia({ audio: true })
       .then((stream) => {
-        stream.getTracks().forEach((t) => t.stop());
-        micReadyRef.current = true;
+        micStreamRef.current = stream;
         beginRecognition();
       })
       .catch((e) => {
@@ -157,6 +180,7 @@ export function useSpeechRecognition(opts: {
   }, [beginRecognition]);
 
   const stop = useCallback(() => {
+    stoppingRef.current = true;
     try {
       recRef.current?.stop();
     } catch {
