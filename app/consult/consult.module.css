@@ -204,26 +204,80 @@
 
 .composer {
   display: flex;
+  flex-direction: column;
   gap: 10px;
-  align-items: flex-end;
 }
 
 .composer textarea {
-  flex: 1;
   resize: vertical;
   min-height: 60px;
 }
 
-.composerSide {
+.composerButtons {
   display: flex;
-  flex-direction: column;
-  gap: 6px;
+  gap: 10px;
 }
 
-.composerSide button {
-  min-width: 60px;
-  height: 38px;
-  padding: 0 14px;
+.micButton,
+.sendButton {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 76px;
+  padding: 12px;
+  border-radius: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.btnIcon {
+  font-size: 1.7rem;
+}
+
+.btnMain {
+  font-size: 1.15rem;
+}
+
+.btnSub {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+.micButton {
+  background: white;
+  border: 2px solid var(--accent);
+  color: var(--accent-dark);
+}
+
+.micActive {
+  background: var(--accent);
+  color: white;
+  animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.sendButton {
+  background: var(--accent);
+  color: white;
+  border: none;
+}
+
+.sendButton:disabled {
+  opacity: 0.5;
 }
 
 .controlsRow {

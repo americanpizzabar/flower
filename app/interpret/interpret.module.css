@@ -161,6 +161,73 @@
   gap: 8px;
 }
 
+.composerButtons {
+  display: flex;
+  gap: 10px;
+}
+
+.micButton,
+.sendButton {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 72px;
+  padding: 10px;
+  border-radius: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.btnIcon {
+  font-size: 1.6rem;
+}
+
+.btnMain {
+  font-size: 1.05rem;
+}
+
+.btnSub {
+  font-size: 0.82rem;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+.micButton {
+  background: white;
+  border: 2px solid var(--accent);
+  color: var(--accent-dark);
+}
+
+.micActive {
+  background: var(--accent);
+  color: white;
+  animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.6;
+  }
+}
+
+.sendButton {
+  background: var(--accent);
+  color: white;
+  border: none;
+}
+
+.sendButton:disabled {
+  opacity: 0.5;
+}
+
 .error {
   color: var(--accent-dark);
   background: var(--accent-light);

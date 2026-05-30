@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import styles from "./interpret.module.css";
-import { SUPPORTED_LANGS, speechLangFor } from "@/lib/types";
+import { SUPPORTED_LANGS, speechLangFor, uiLabel } from "@/lib/types";
 import { useSpeechRecognition, speak } from "@/lib/speech";
 
 interface Turn {
@@ -137,22 +137,25 @@ export default function InterpretPage() {
             rows={3}
             placeholder="例: いらっしゃいませ。どんな雰囲気のお花をお探しですか？"
           />
-          <div className={styles.composerActions}>
-            {staffSpeech.supported &&
-              (staffSpeech.listening ? (
-                <button className="ghost" onClick={staffSpeech.stop}>
-                  ⏹
-                </button>
-              ) : (
-                <button className="ghost" onClick={staffSpeech.start}>
-                  🎤
-                </button>
-              ))}
+          <div className={styles.composerButtons}>
+            {staffSpeech.supported && (
+              <button
+                className={`${styles.micButton} ${staffSpeech.listening ? styles.micActive : ""}`}
+                onClick={() => (staffSpeech.listening ? staffSpeech.stop() : staffSpeech.start())}
+                disabled={loading !== null}
+              >
+                <span className={styles.btnIcon}>{staffSpeech.listening ? "⏹" : "🎤"}</span>
+                <span className={styles.btnMain}>{staffSpeech.listening ? "停止" : "話す"}</span>
+              </button>
+            )}
             <button
+              className={styles.sendButton}
               onClick={() => send("staff")}
               disabled={loading !== null || !staffInput.trim()}
             >
-              {loading === "staff" ? "翻訳中..." : "→ お客様へ"}
+              <span className={styles.btnIcon}>{loading === "staff" ? "⏳" : "🔄"}</span>
+              <span className={styles.btnMain}>翻訳して伝える</span>
+              <span className={styles.btnSub}>{uiLabel(customerLang, "send")}</span>
             </button>
           </div>
         </div>
@@ -167,22 +170,35 @@ export default function InterpretPage() {
             rows={3}
             placeholder="例: I'd like a small bouquet around 30 dollars."
           />
-          <div className={styles.composerActions}>
-            {customerSpeech.supported &&
-              (customerSpeech.listening ? (
-                <button className="ghost" onClick={customerSpeech.stop}>
-                  ⏹
-                </button>
-              ) : (
-                <button className="ghost" onClick={customerSpeech.start}>
-                  🎤
-                </button>
-              ))}
+          <div className={styles.composerButtons}>
+            {customerSpeech.supported && (
+              <button
+                className={`${styles.micButton} ${customerSpeech.listening ? styles.micActive : ""}`}
+                onClick={() =>
+                  customerSpeech.listening ? customerSpeech.stop() : customerSpeech.start()
+                }
+                disabled={loading !== null}
+              >
+                <span className={styles.btnIcon}>{customerSpeech.listening ? "⏹" : "🎤"}</span>
+                <span className={styles.btnMain}>
+                  {customerSpeech.listening ? "停止" : "話す"}
+                </span>
+                {customerLang !== "ja" && (
+                  <span className={styles.btnSub}>
+                    {customerSpeech.listening
+                      ? uiLabel(customerLang, "stop")
+                      : uiLabel(customerLang, "speak")}
+                  </span>
+                )}
+              </button>
+            )}
             <button
+              className={styles.sendButton}
               onClick={() => send("customer")}
               disabled={loading !== null || !customerInput.trim()}
             >
-              {loading === "customer" ? "翻訳中..." : "→ 店員へ"}
+              <span className={styles.btnIcon}>{loading === "customer" ? "⏳" : "🔄"}</span>
+              <span className={styles.btnMain}>翻訳して伝える</span>
             </button>
           </div>
         </div>

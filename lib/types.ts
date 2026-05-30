@@ -114,3 +114,30 @@ export function speechLangFor(bcp47: string): string {
   if (bcp47.includes("-")) return bcp47;
   return bcp47;
 }
+
+// Short UI labels for the big mic/send buttons, shown in the customer's
+// selected language alongside the Japanese label so both staff and customer
+// understand the button at a glance.
+export type UiKey = "speak" | "stop" | "send";
+
+const UI_LABELS: Record<string, Record<UiKey, string>> = {
+  ja: { speak: "話す", stop: "停止", send: "送信" },
+  en: { speak: "Speak", stop: "Stop", send: "Send" },
+  "zh-Hans": { speak: "说话", stop: "停止", send: "发送" },
+  "zh-Hant": { speak: "說話", stop: "停止", send: "傳送" },
+  ko: { speak: "말하기", stop: "정지", send: "보내기" },
+  es: { speak: "Hablar", stop: "Parar", send: "Enviar" },
+  fr: { speak: "Parler", stop: "Arrêter", send: "Envoyer" },
+  de: { speak: "Sprechen", stop: "Stopp", send: "Senden" },
+  it: { speak: "Parla", stop: "Ferma", send: "Invia" },
+  pt: { speak: "Falar", stop: "Parar", send: "Enviar" },
+  ru: { speak: "Говорить", stop: "Стоп", send: "Отправить" },
+  th: { speak: "พูด", stop: "หยุด", send: "ส่ง" },
+  vi: { speak: "Nói", stop: "Dừng", send: "Gửi" },
+  id: { speak: "Bicara", stop: "Berhenti", send: "Kirim" },
+};
+
+export function uiLabel(lang: string, key: UiKey): string {
+  const table = UI_LABELS[lang] || UI_LABELS[lang.split("-")[0]] || UI_LABELS.en;
+  return table[key];
+}

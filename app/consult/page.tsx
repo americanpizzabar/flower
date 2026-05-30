@@ -284,19 +284,30 @@ export default function ConsultPage() {
             }
           }}
         />
-        <div className={styles.composerSide}>
-          {speech.supported &&
-            (speech.listening ? (
-              <button className="ghost" onClick={speech.stop}>
-                ⏹
-              </button>
-            ) : (
-              <button className="ghost" onClick={speech.start}>
-                🎤
-              </button>
-            ))}
-          <button onClick={send} disabled={loading || !input.trim()}>
-            {loading ? "..." : "送信"}
+        <div className={styles.composerButtons}>
+          {speech.supported && (
+            <button
+              className={`${styles.micButton} ${speech.listening ? styles.micActive : ""}`}
+              onClick={() => (speech.listening ? speech.stop() : speech.start())}
+              disabled={loading}
+            >
+              <span className={styles.btnIcon}>{speech.listening ? "⏹" : "🎤"}</span>
+              <span className={styles.btnMain}>{speech.listening ? "停止" : "話す"}</span>
+              {lang !== "ja" && (
+                <span className={styles.btnSub}>
+                  {speech.listening ? uiLabel(lang, "stop") : uiLabel(lang, "speak")}
+                </span>
+              )}
+            </button>
+          )}
+          <button
+            className={styles.sendButton}
+            onClick={send}
+            disabled={loading || !input.trim()}
+          >
+            <span className={styles.btnIcon}>{loading ? "⏳" : "📨"}</span>
+            <span className={styles.btnMain}>送信</span>
+            {lang !== "ja" && <span className={styles.btnSub}>{uiLabel(lang, "send")}</span>}
           </button>
         </div>
       </div>

@@ -345,6 +345,36 @@ export default function ShowPage() {
     );
   }
 
+  // Big, bilingual mic + send buttons (icon + Japanese + customer's language).
+  const renderBigButtons = (onSend: () => void) => (
+    <div className={styles.composerButtons}>
+      {speech.supported && (
+        <button
+          className={`${styles.micButton} ${speech.listening ? styles.micActive : ""}`}
+          onClick={() => (speech.listening ? speech.stop() : speech.start())}
+          disabled={hearLoading}
+        >
+          <span className={styles.btnIcon}>{speech.listening ? "⏹" : "🎤"}</span>
+          <span className={styles.btnMain}>{speech.listening ? "停止" : "話す"}</span>
+          {lang !== "ja" && (
+            <span className={styles.btnSub}>
+              {speech.listening ? uiLabel(lang, "stop") : uiLabel(lang, "speak")}
+            </span>
+          )}
+        </button>
+      )}
+      <button
+        className={styles.sendButton}
+        onClick={onSend}
+        disabled={hearLoading || !input.trim()}
+      >
+        <span className={styles.btnIcon}>{hearLoading ? "⏳" : "📨"}</span>
+        <span className={styles.btnMain}>送信</span>
+        {lang !== "ja" && <span className={styles.btnSub}>{uiLabel(lang, "send")}</span>}
+      </button>
+    </div>
+  );
+
   return (
     <div>
       <h1>📸 花を見せる（組み合わせ提案）</h1>
@@ -391,21 +421,7 @@ export default function ShowPage() {
             placeholder="例: A romantic red bouquet for a wedding anniversary, meaning deep love..."
           />
 
-          <div className={styles.actions}>
-            {speech.supported &&
-              (speech.listening ? (
-                <button className="ghost" onClick={speech.stop}>
-                  ⏹ 停止
-                </button>
-              ) : (
-                <button className="ghost" onClick={speech.start}>
-                  🎤 音声で入力
-                </button>
-              ))}
-            <button onClick={sendHearing} disabled={hearLoading || !input.trim()}>
-              {hearLoading ? "整理中..." : "送信"}
-            </button>
-          </div>
+          {renderBigButtons(sendHearing)}
 
           {turns.length > 0 && (
             <div className={styles.askBox}>
@@ -557,21 +573,7 @@ export default function ShowPage() {
               rows={2}
               placeholder="お客様: 例) I'd prefer the lighter pink ones..."
             />
-            <div className={styles.actions}>
-              {speech.supported &&
-                (speech.listening ? (
-                  <button className="ghost" onClick={speech.stop}>
-                    ⏹ 停止
-                  </button>
-                ) : (
-                  <button className="ghost" onClick={speech.start}>
-                    🎤 お客様が音声入力
-                  </button>
-                ))}
-              <button onClick={sendHearing} disabled={hearLoading || !input.trim()}>
-                {hearLoading ? "整理中..." : "お客様の発言を送信"}
-              </button>
-            </div>
+            {renderBigButtons(sendHearing)}
 
             {/* Staff comment (Japanese -> customer language) */}
             <div className={styles.customAskRow} style={{ marginTop: 8 }}>

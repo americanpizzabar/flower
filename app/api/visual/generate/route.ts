@@ -66,35 +66,39 @@ export async function POST(req: Request) {
     // 2) Generate using only that explicit whitelist.
     let generated: GeneratedImage = await generateProposalImage(media, brief, allowedList);
 
-    // 3) Verify the output; if a flower outside the list slipped in, regenerate once
-    //    with explicit removal feedback.
-    let verified = true;
-    let unverifiedNote = "";
+    // 3) Verify the output; if a flower outside the list slipped in, regenerate
+    //    once with explicit removal feedback. Whatever the verifier still flags
+    //    after that is handed to the description step so it can be disclosed to
+    //    the customer rather than silently shown.
+    let detectedExtras = "";
     try {
       const check = await verifyArrangement(generated, allowedList);
       if (!check.ok && check.extra_ja) {
         generated = await generateProposalImage(media, brief, allowedList, check.extra_ja);
         const recheck = await verifyArrangement(generated, allowedList);
-        if (!recheck.ok && recheck.extra_ja) {
-          verified = false;
-          unverifiedNote = `リスト外の花が残っている可能性があります: ${recheck.extra_ja}`;
-        }
+        detectedExtras = recheck.ok ? "" : recheck.extra_ja || "";
       }
     } catch {
       // Verification is best-effort; never block the result on it.
-      verified = true;
+      detectedExtras = "";
     }
 
-    const desc = await describeArrangement(generated, brief, lang);
+    // 4) Describe the final image, comparing it against the whitelist. The
+    //    description step re-checks the image and, if any flower/greenery shown
+    //    isn't actually in stock, says so explicitly in the customer's language.
+    const desc = await describeArrangement(generated, brief, lang, allowedList, detectedExtras);
 
+    const unavailable = (desc.unavailable_ja || detectedExtras).trim();
     const result: ProposalResult = {
       image_data_url: `data:${generated.mimeType};base64,${generated.base64}`,
       description_customer: desc.description_customer,
       description_ja: desc.description_ja,
       flower_meanings_ja: desc.flower_meanings_ja,
       used_flowers_ja: allowedList,
-      verified,
-      unverified_note_ja: unverifiedNote,
+      verified: !unavailable,
+      unverified_note_ja: unavailable
+        ? `画像には在庫リストに無い花・緑が含まれている可能性があります: ${unavailable}（お客様向けの説明にも「現在ご用意がない」旨を記載しています）`
+        : "",
     };
     return NextResponse.json(result);
   } catch (e) {
