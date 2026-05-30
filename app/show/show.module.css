@@ -390,3 +390,231 @@
   border-radius: 8px;
   margin: 0;
 }
+
+/* ===== Layout / header (were relying on browser defaults) ===== */
+.wrap {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.title {
+  margin-bottom: 12px;
+}
+
+.langRow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.select {
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.autoSpeak {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  color: var(--muted);
+  cursor: pointer;
+  margin-left: auto;
+}
+
+.interim {
+  opacity: 0.6;
+  font-style: italic;
+}
+
+/* ===== Composer + big bilingual buttons ===== */
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.input {
+  width: 100%;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 1rem;
+  resize: vertical;
+  font-family: inherit;
+}
+
+.composerButtons {
+  display: flex;
+  gap: 10px;
+}
+
+.micButton,
+.sendButton {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  min-height: 76px;
+  padding: 12px;
+  border-radius: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.btnIcon {
+  font-size: 1.7rem;
+}
+
+.btnMain {
+  font-size: 1.15rem;
+}
+
+.btnSub {
+  font-size: 0.85rem;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+.micButton {
+  background: white;
+  border: 2px solid var(--accent);
+  color: var(--accent-dark);
+}
+
+.micActive {
+  background: var(--accent);
+  color: white;
+  animation: pulse 1.2s infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.6; }
+}
+
+.sendButton {
+  background: var(--accent);
+  color: white;
+  border: none;
+}
+
+.sendButton:disabled {
+  opacity: 0.5;
+}
+
+/* ===== Primary / secondary actions ===== */
+.primary {
+  padding: 14px 24px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 1.05rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.primary:disabled {
+  opacity: 0.5;
+}
+
+.secondary {
+  padding: 12px 20px;
+  background: white;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+/* ===== Capture controls ===== */
+.shoot,
+.recordBtn,
+.stopBtn,
+.closeCam,
+.libBtn {
+  padding: 12px 16px;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  border: 1px solid var(--border);
+  background: white;
+}
+
+.shoot {
+  background: var(--accent);
+  color: white;
+  border: none;
+}
+
+.recordBtn {
+  background: #d91e1e;
+  color: white;
+  border: none;
+}
+
+.stopBtn {
+  background: #555;
+  color: white;
+  border: none;
+}
+
+/* ===== Staff comment box (capture step) ===== */
+.staffAsk {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+}
+
+.staffAskLabel {
+  display: block;
+  font-size: 0.85rem;
+  color: var(--accent-dark);
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.staffAskRow {
+  display: flex;
+  gap: 8px;
+}
+
+.staffAskInput {
+  flex: 1;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 1rem;
+}
+
+.askButton {
+  padding: 10px 18px;
+  background: var(--accent-dark);
+  color: white;
+  border: none;
+  border-radius: 8px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* ===== Result: read-aloud button ===== */
+.speakBtn {
+  padding: 12px 20px;
+  background: var(--accent);
+  color: white;
+  border: none;
+  border-radius: 10px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+}

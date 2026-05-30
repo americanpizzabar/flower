@@ -346,39 +346,53 @@ export async function verifyArrangement(
 }
 
 const DESCRIBE_SYSTEM = `あなたは花屋の多言語接客アシスタントです。
-AI が生成した「花の組み合わせ提案画像」と、お客様の要望 (target_lang 付き) を受け取ります。
+AI が生成した「花の組み合わせ提案画像」と、お客様の要望 (target_lang 付き)、そして「店内に実在する花のリスト (allowed_list)」を受け取ります。
 
 ## 最重要ルール: 言語
 - description_customer は必ず target_lang の言語で書く (target_lang が ja の場合を除き日本語にしない)。
-- description_ja と flower_meanings_ja は日本語で書く。
+- description_ja, flower_meanings_ja, unavailable_ja は日本語で書く。
 
 ## 手順
-1. 画像に実際に写っている花だけを観察する (写っていない花を推測で挙げない)
-2. description_customer: target_lang で、温かく魅力的な説明文を作る。実際に使われている花とその花言葉に触れる
-3. description_ja: その日本語訳
-4. flower_meanings_ja: 画像に含まれる花の花言葉を日本語でまとめる
+1. 画像に実際に写っている花・葉・グリーンだけを注意深く観察する (写っていないものを推測で挙げない)。
+2. 観察した花・緑が、それぞれ allowed_list に含まれているかを照合する。
+3. unavailable_ja: 画像に写っているのに allowed_list に「無い」花・葉・グリーンがあれば、その名前を日本語で具体的に列挙する。すべて allowed_list 内なら空文字。
+4. description_customer: target_lang で、温かく魅力的な説明文を作る。実際に使われている花とその花言葉に触れる。
+   - **重要**: allowed_list に無い花・緑が画像に含まれている場合は、説明文の中で「これらは完成イメージのための参考で、当店には現在ご用意がありません」という趣旨を、対象の花・緑の名前とともに target_lang で明確に伝えること。お客様が誤解しないようにする。
+5. description_ja: description_customer の日本語訳 (在庫にない花の注意書きも必ず含める)。
+6. flower_meanings_ja: 画像に含まれる花の花言葉を日本語でまとめる。
 
 JSON のみで返答 (前後にテキストやコードフェンスを付けない):
 {
-  "description_customer": "target_lang の説明 (花言葉に触れる)",
+  "description_customer": "target_lang の説明 (花言葉に触れる。在庫にない花があればその旨も明記)",
   "description_ja": "その日本語訳",
-  "flower_meanings_ja": "使われている花の花言葉 (日本語)"
+  "flower_meanings_ja": "使われている花の花言葉 (日本語)",
+  "unavailable_ja": "画像に写っているが在庫リストに無い花・緑 (なければ空文字)"
 }`;
 
 export interface ArrangementDescription {
   description_customer: string;
   description_ja: string;
   flower_meanings_ja: string;
+  unavailable_ja: string;
 }
 
 export async function describeArrangement(
   generated: GeneratedImage,
   briefText: string,
   lang: string,
+  allowedListText: string,
+  knownExtras?: string,
 ): Promise<ArrangementDescription> {
+  const extrasHint = knownExtras
+    ? `\n\n# 注意: 検証ステップで次の花がリスト外として検出されています。画像をよく見て確認し、含まれていれば必ず説明に明記してください: ${knownExtras}`
+    : "";
   const parts = [
     {
-      text: `target_lang: ${lang}\nお客様の要望:\n${briefText}\n\n下の画像が提案するアレンジです。`,
+      text:
+        `target_lang: ${lang}\n` +
+        `# 店内に実在する花のリスト (allowed_list)\n${allowedListText}\n\n` +
+        `# お客様の要望\n${briefText}${extrasHint}\n\n` +
+        `下の画像が提案するアレンジです。allowed_list と照合して説明してください。`,
     },
     { inlineData: { mimeType: generated.mimeType, data: generated.base64 } },
   ];
@@ -386,7 +400,7 @@ export async function describeArrangement(
   return await callJson<ArrangementDescription>({
     system: DESCRIBE_SYSTEM,
     contents: [{ role: "user", parts }],
-    maxOutputTokens: 2000,
+    maxOutputTokens: 2500,
     temperature: 0.6,
   });
 }

@@ -69,7 +69,11 @@ export function useSpeechRecognition(opts: {
     setSupported(getRecognitionCtor() !== null);
   }, []);
 
-  const start = useCallback(() => {
+  // Tracks whether we've already obtained mic permission this session, so we
+  // only pay the getUserMedia warm-up cost on the very first start().
+  const micReadyRef = useRef(false);
+
+  const beginRecognition = useCallback(() => {
     if (recRef.current) {
       try {
         recRef.current.abort();
@@ -127,6 +131,30 @@ export function useSpeechRecognition(opts: {
       onErrorRef.current?.(e instanceof Error ? e.message : "start failed");
     }
   }, [opts.lang]);
+
+  const start = useCallback(() => {
+    // On the very first use, the browser shows a microphone-permission prompt.
+    // If we start SpeechRecognition straight away, that first session is often
+    // discarded while the user is still deciding, so the opening utterance is
+    // never recognized. Pre-warm the permission with getUserMedia first, then
+    // begin recognition — subsequent starts skip this and begin immediately.
+    if (micReadyRef.current || !navigator.mediaDevices?.getUserMedia) {
+      beginRecognition();
+      return;
+    }
+    setListening(true);
+    navigator.mediaDevices
+      .getUserMedia({ audio: true })
+      .then((stream) => {
+        stream.getTracks().forEach((t) => t.stop());
+        micReadyRef.current = true;
+        beginRecognition();
+      })
+      .catch((e) => {
+        setListening(false);
+        onErrorRef.current?.(e instanceof Error ? e.message : "mic permission denied");
+      });
+  }, [beginRecognition]);
 
   const stop = useCallback(() => {
     try {

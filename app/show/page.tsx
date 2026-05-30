@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import styles from "./show.module.css";
 import {
   SUPPORTED_LANGS,
+  uiLabel,
   type ConsultTurn,
   type ProposalResult,
   type VisualBriefResult,

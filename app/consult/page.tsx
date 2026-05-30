@@ -9,6 +9,7 @@ import {
   type ConsultTurn,
   type SlotKey,
   SUPPORTED_LANGS,
+  uiLabel,
 } from "@/lib/types";
 import { speak, useSpeechRecognition } from "@/lib/speech";
 
