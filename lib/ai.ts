@@ -434,6 +434,43 @@ export async function interpret(
   });
 }
 
+const TRANSCRIBE_SYSTEM = `あなたは多言語の音声書き起こしエンジンです。
+添付された音声に話されている言葉を、そのままの言語で正確に文字起こしします。
+
+ルール:
+- 話されている言語のまま書き起こす (翻訳しない)。
+- lang_hint は話者の言語のヒントです。明らかに違う言語が話されている場合は実際の言語を優先します。
+- 句読点を適切に補う。フィラー (えー、あー、um 等) は省く。
+- 何も聞き取れない、または無音の場合は transcript を空文字にする。
+- 聞こえた言葉だけを書く。推測で内容を足さない。
+
+JSON のみで返答 (前後にテキストやコードフェンスを付けない):
+{ "transcript": "聞き取った発話", "detected_language": "BCP-47" }`;
+
+export interface TranscriptResult {
+  transcript: string;
+  detected_language: string;
+}
+
+export async function transcribeAudio(
+  audioBase64: string,
+  mimeType: string,
+  langHint: string,
+): Promise<TranscriptResult> {
+  const parts = [
+    {
+      text: `lang_hint: ${langHint}\nこの音声を、話されている言語のまま文字起こししてください。`,
+    },
+    { inlineData: { mimeType, data: audioBase64 } },
+  ];
+  return await callJson<TranscriptResult>({
+    system: TRANSCRIBE_SYSTEM,
+    contents: [{ role: "user", parts }],
+    maxOutputTokens: 1500,
+    temperature: 0,
+  });
+}
+
 const INTRO_SYSTEM = `あなたは花屋の多言語案内アシスタントです。
 店の Web ページから抽出したテキストを受け取り、各国の観光客向けに分かりやすく要約・翻訳します。
 

@@ -2,51 +2,51 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 
-interface SRAlternative {
-  transcript: string;
-}
-interface SRResult {
-  isFinal: boolean;
-  length: number;
-  0: SRAlternative;
-}
-interface SRResultList {
-  length: number;
-  [index: number]: SRResult;
-}
-interface SREvent {
-  results: SRResultList;
-  resultIndex: number;
-}
-interface SRErrorEvent {
-  error: string;
-}
-
-interface SR {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  start: () => void;
+interface MediaRecorderLike {
+  start: (timeslice?: number) => void;
   stop: () => void;
-  abort: () => void;
-  onresult: ((e: SREvent) => void) | null;
-  onerror: ((e: SRErrorEvent) => void) | null;
-  onend: (() => void) | null;
+  state: string;
+  ondataavailable: ((e: { data: Blob }) => void) | null;
+  onstop: (() => void) | null;
+  onerror: ((e: unknown) => void) | null;
 }
 
-interface SRCtor {
-  new (): SR;
+interface MediaRecorderCtor {
+  new (stream: MediaStream, options?: { mimeType?: string; audioBitsPerSecond?: number }): MediaRecorderLike;
+  isTypeSupported?: (mime: string) => boolean;
 }
 
-function getRecognitionCtor(): SRCtor | null {
+function getMediaRecorderCtor(): MediaRecorderCtor | null {
   if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: SRCtor;
-    webkitSpeechRecognition?: SRCtor;
-  };
-  return w.SpeechRecognition || w.webkitSpeechRecognition || null;
+  return (window as unknown as { MediaRecorder?: MediaRecorderCtor }).MediaRecorder || null;
 }
 
+function pickAudioMime(): string | undefined {
+  const MR = getMediaRecorderCtor();
+  if (!MR || !MR.isTypeSupported) return undefined;
+  const candidates = ["audio/webm;codecs=opus", "audio/webm", "audio/mp4", "audio/ogg;codecs=opus"];
+  for (const c of candidates) {
+    if (MR.isTypeSupported(c)) return c;
+  }
+  return undefined;
+}
+
+/**
+ * Microphone capture + transcription.
+ *
+ * We deliberately do NOT use the streaming Web Speech API (webkitSpeechRecognition):
+ * its recognition engine has an unavoidable cold-start window during which the
+ * first ~1 second of audio is silently dropped, and there is no event that tells
+ * us when it is actually ready. That is why the opening words kept getting lost.
+ *
+ * Instead we record raw audio with MediaRecorder — which captures every sample
+ * from the very first millisecond — and transcribe the finished clip with Gemini
+ * (POST /api/transcribe). Nothing at the start is dropped.
+ *
+ * The returned shape is unchanged so callers don't need to change:
+ *   { listening, interim, supported, start, stop }
+ * `interim` now surfaces a status hint ("聞き取り中…") while transcribing.
+ */
 export function useSpeechRecognition(opts: {
   lang: string;
   onFinal?: (text: string) => void;
@@ -55,134 +55,136 @@ export function useSpeechRecognition(opts: {
   const [listening, setListening] = useState(false);
   const [interim, setInterim] = useState("");
   const [supported, setSupported] = useState(true);
-  const recRef = useRef<SR | null>(null);
-  const finalTextRef = useRef("");
+
+  const streamRef = useRef<MediaStream | null>(null);
+  const recorderRef = useRef<MediaRecorderLike | null>(null);
+  const chunksRef = useRef<Blob[]>([]);
+  const mimeRef = useRef<string | undefined>(undefined);
+  const cancelledRef = useRef(false);
+
+  const langRef = useRef(opts.lang);
   const onFinalRef = useRef(opts.onFinal);
   const onErrorRef = useRef(opts.onError);
-  // A long-lived microphone stream. Once permission is granted we keep it open
-  // so the OS microphone stays "warm". The very first SpeechRecognition session
-  // otherwise has to cold-start the audio pipeline, and the opening words are
-  // captured before it is ready — which is why only the first utterance was lost.
-  const micStreamRef = useRef<MediaStream | null>(null);
-  const stoppingRef = useRef(false);
 
   useEffect(() => {
+    langRef.current = opts.lang;
     onFinalRef.current = opts.onFinal;
     onErrorRef.current = opts.onError;
-  }, [opts.onFinal, opts.onError]);
+  }, [opts.lang, opts.onFinal, opts.onError]);
 
   useEffect(() => {
-    setSupported(getRecognitionCtor() !== null);
+    setSupported(
+      typeof navigator !== "undefined" &&
+        !!navigator.mediaDevices?.getUserMedia &&
+        getMediaRecorderCtor() !== null,
+    );
   }, []);
 
+  // Release the mic when the component unmounts.
   useEffect(() => {
     return () => {
       try {
-        recRef.current?.abort();
+        if (recorderRef.current && recorderRef.current.state !== "inactive") {
+          cancelledRef.current = true;
+          recorderRef.current.stop();
+        }
       } catch {
         /* ignore */
       }
-      micStreamRef.current?.getTracks().forEach((t) => t.stop());
-      micStreamRef.current = null;
+      streamRef.current?.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
     };
   }, []);
 
-  const beginRecognition = useCallback(() => {
-    if (recRef.current) {
-      try {
-        recRef.current.abort();
-      } catch {
-        /* ignore */
-      }
-      recRef.current = null;
+  async function transcribe(blob: Blob) {
+    if (blob.size === 0) {
+      setInterim("");
+      return;
     }
-    const Ctor = getRecognitionCtor();
-    if (!Ctor) {
+    setInterim("聞き取り中…");
+    try {
+      const form = new FormData();
+      const ext = (mimeRef.current || "audio/webm").includes("mp4") ? "mp4" : "webm";
+      form.append("audio", new File([blob], `speech.${ext}`, { type: mimeRef.current || "audio/webm" }));
+      // Send the broad language part as a hint (e.g. "en-US" -> "en"); the model
+      // still auto-detects if the speaker uses a different language.
+      form.append("lang", (langRef.current || "auto").split("-")[0]);
+      const res = await fetch("/api/transcribe", { method: "POST", body: form });
+      const ct = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        const t = await res.text();
+        throw new Error(`サーバーから予期しない応答 (HTTP ${res.status}): ${t.slice(0, 120)}`);
+      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "音声を認識できませんでした");
+      const text = (data.transcript || "").trim();
+      if (text) onFinalRef.current?.(text);
+    } catch (e) {
+      onErrorRef.current?.(e instanceof Error ? e.message : "音声認識に失敗しました");
+    } finally {
+      setInterim("");
+    }
+  }
+
+  const start = useCallback(async () => {
+    const MR = getMediaRecorderCtor();
+    if (!MR || !navigator.mediaDevices?.getUserMedia) {
       setSupported(false);
       return;
     }
-    const rec = new Ctor();
-    rec.lang = opts.lang;
-    // Continuous keeps the session open until the user taps stop, so a short
-    // opening phrase is not cut off by the engine ending the session early.
-    rec.continuous = true;
-    rec.interimResults = true;
-    finalTextRef.current = "";
-    stoppingRef.current = false;
-
-    rec.onresult = (e) => {
-      let interimText = "";
-      let appendedFinal = "";
-      for (let i = e.resultIndex || 0; i < e.results.length; i++) {
-        const r = e.results[i];
-        const transcript = r[0]?.transcript || "";
-        if (r.isFinal) appendedFinal += transcript;
-        else interimText += transcript;
-      }
-      if (appendedFinal) finalTextRef.current += appendedFinal;
-      setInterim(interimText);
-    };
-
-    rec.onerror = (e) => {
-      if (e.error && e.error !== "no-speech" && e.error !== "aborted") {
-        onErrorRef.current?.(e.error);
-      }
-    };
-
-    rec.onend = () => {
-      // In continuous mode some browsers end the session on a long silence even
-      // though the user hasn't tapped stop. Restart transparently so we keep
-      // listening; only emit the final text once the user actually stops.
-      if (!stoppingRef.current && recRef.current === rec) {
-        try {
-          rec.start();
-          return;
-        } catch {
-          /* fall through to finalize */
-        }
-      }
-      setListening(false);
-      setInterim("");
-      const finalText = finalTextRef.current.trim();
-      if (finalText) onFinalRef.current?.(finalText);
-      finalTextRef.current = "";
-    };
-
+    if (listening) return;
+    cancelledRef.current = false;
+    setInterim("");
     try {
-      rec.start();
-      recRef.current = rec;
+      const stream =
+        streamRef.current ||
+        (await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true },
+        }));
+      streamRef.current = stream;
+
+      const mime = pickAudioMime();
+      mimeRef.current = mime;
+      const recorder = new MR(stream, {
+        ...(mime ? { mimeType: mime } : {}),
+        audioBitsPerSecond: 96_000,
+      });
+      chunksRef.current = [];
+
+      recorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) chunksRef.current.push(e.data);
+      };
+      recorder.onstop = () => {
+        setListening(false);
+        const blob = new Blob(chunksRef.current, { type: mime || "audio/webm" });
+        chunksRef.current = [];
+        if (!cancelledRef.current) void transcribe(blob);
+      };
+      recorder.onerror = (err) => {
+        setListening(false);
+        onErrorRef.current?.(`録音でエラーが発生しました: ${String(err)}`);
+      };
+
+      // Capturing starts immediately — the first word is recorded from t=0.
+      recorder.start();
+      recorderRef.current = recorder;
       setListening(true);
     } catch (e) {
       setListening(false);
-      onErrorRef.current?.(e instanceof Error ? e.message : "start failed");
+      const msg = e instanceof Error ? e.message : "マイクを起動できませんでした";
+      onErrorRef.current?.(
+        /permission|denied|notallowed/i.test(msg)
+          ? "マイクへのアクセスが許可されませんでした。ブラウザの設定でマイクを許可してください。"
+          : msg,
+      );
     }
-  }, [opts.lang]);
-
-  const start = useCallback(() => {
-    // Acquire (and keep) the microphone before starting recognition. This both
-    // surfaces the permission prompt up front and keeps the mic warm so the
-    // first utterance is captured. Subsequent starts reuse the warm stream.
-    if (micStreamRef.current || !navigator.mediaDevices?.getUserMedia) {
-      beginRecognition();
-      return;
-    }
-    setListening(true);
-    navigator.mediaDevices
-      .getUserMedia({ audio: true })
-      .then((stream) => {
-        micStreamRef.current = stream;
-        beginRecognition();
-      })
-      .catch((e) => {
-        setListening(false);
-        onErrorRef.current?.(e instanceof Error ? e.message : "mic permission denied");
-      });
-  }, [beginRecognition]);
+  }, [listening]);
 
   const stop = useCallback(() => {
-    stoppingRef.current = true;
     try {
-      recRef.current?.stop();
+      if (recorderRef.current && recorderRef.current.state !== "inactive") {
+        recorderRef.current.stop(); // -> onstop -> transcribe()
+      }
     } catch {
       /* ignore */
     }
