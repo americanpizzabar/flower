@@ -176,49 +176,48 @@ export function useSpeechRecognition(opts: {
   return { listening, interim, supported, start, stop };
 }
 
-// Unlock speechSynthesis on first user gesture (mainly for iOS Safari) by
-// speaking a silent utterance. Subsequent speak() calls then work.
-let synthUnlocked = false;
-export function unlockSpeech() {
-  if (typeof window === "undefined" || synthUnlocked) return;
-  const synth = window.speechSynthesis;
-  if (!synth) return;
-  try {
-    const u = new SpeechSynthesisUtterance(" ");
-    u.volume = 0;
-    synth.speak(u);
-    synthUnlocked = true;
-  } catch {
-    /* ignore */
-  }
-}
+// On the very first speak() of a session, the engine cold-starts and tends to
+// clip the opening syllable. We absorb that ramp with one near-silent lead-in
+// utterance (see speak()), tracked by this flag.
+let leadInDone = false;
 
 export function speak(text: string, lang: string) {
   if (typeof window === "undefined" || !text) return;
   const synth = window.speechSynthesis;
   if (!synth) return;
-  // Must run synchronously: Chrome on Android (and iOS Safari) only start audio
-  // when speak() is called inside the user gesture. Deferring via rAF/setTimeout
-  // drops the gesture and the utterance stays silent.
+  // Only clear the queue if something is actually playing/queued. Calling
+  // cancel() unconditionally right after the engine starts can clip the first
+  // word of the new utterance (the cause of the "途切れる" opening).
   try {
-    synth.cancel();
+    if (synth.speaking || synth.pending) synth.cancel();
   } catch {
     /* ignore */
   }
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = lang;
-  u.rate = 1.0;
-  u.pitch = 1.0;
-  // Pick an explicit matching voice when one is available — some browsers fail
-  // to auto-select a voice for the requested lang and stay silent otherwise.
   const voices = synth.getVoices?.() || [];
-  if (voices.length > 0) {
+  const pickVoice = (u: SpeechSynthesisUtterance) => {
+    if (voices.length === 0) return;
     const base = lang.split("-")[0].toLowerCase();
     const match =
       voices.find((v) => v.lang === lang) ||
       voices.find((v) => v.lang.toLowerCase().startsWith(base));
     if (match) u.voice = match;
+  };
+  // Queue a very short, near-silent lead-in first. The engine spends its
+  // cold-start ramp on this throwaway utterance, so the real sentence starts
+  // cleanly without the first syllable being cut off.
+  if (!leadInDone) {
+    const lead = new SpeechSynthesisUtterance("、");
+    lead.lang = lang;
+    lead.volume = 0.01;
+    pickVoice(lead);
+    synth.speak(lead);
+    leadInDone = true;
   }
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang;
+  u.rate = 1.0;
+  u.pitch = 1.0;
+  pickVoice(u);
   synth.speak(u);
   // Chrome can get stuck in a paused state after cancel(); nudge it back.
   try {

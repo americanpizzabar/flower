@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./show.module.css";
 import {
+  showGuide,
   SUPPORTED_LANGS,
   uiLabel,
   type ConsultTurn,
@@ -36,11 +37,17 @@ interface ChatTurn {
 export default function ShowPage() {
   const [step, setStep] = useState<Step>("hearing");
   const [lang, setLang] = useState("en");
-  // When the customer arrived from the welcome flow (/start), honor ?lang=.
+  // Whether the customer arrived from the welcome flow (/start) with a chosen
+  // language; if so we read the usage guide aloud automatically on arrival.
+  const [fromStart, setFromStart] = useState(false);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get("lang");
-    if (q && SUPPORTED_LANGS.some((l) => l.code === q)) setLang(q);
+    if (q && SUPPORTED_LANGS.some((l) => l.code === q)) {
+      setLang(q);
+      setFromStart(true);
+    }
   }, []);
+  const guideSpokenRef = useRef(false);
 
   // Hearing
   const [turns, setTurns] = useState<ChatTurn[]>([]);
@@ -87,6 +94,15 @@ export default function ShowPage() {
     lang: speechLang,
     onFinal: (t) => setInput((prev) => (prev ? `${prev} ${t}` : t)),
   });
+
+  // Speak the usage guide once, in the customer's language, when they arrive
+  // from the welcome flow. speechSynthesis was already unlocked there.
+  useEffect(() => {
+    if (fromStart && !guideSpokenRef.current) {
+      guideSpokenRef.current = true;
+      speak(showGuide(lang), speechLang);
+    }
+  }, [fromStart, lang, speechLang]);
 
   async function sendHearing() {
     const text = input.trim();
@@ -401,6 +417,17 @@ export default function ShowPage() {
       {/* Step 1: hearing */}
       {step === "hearing" && (
         <div className={styles.card}>
+          {/* Customer-facing usage guide, in their own language (spoken + written). */}
+          <div className={styles.guideBox}>
+            <p className={styles.guideText}>{showGuide(lang)}</p>
+            <button
+              className={styles.guideSpeak}
+              onClick={() => speak(showGuide(lang), speechLang)}
+            >
+              🔊 {uiLabel(lang, "speak")}
+            </button>
+          </div>
+
           {turns.length === 0 && (
             <>
               <label>お客様の言語</label>
@@ -428,29 +455,27 @@ export default function ShowPage() {
 
           {renderBigButtons(sendHearing)}
 
-          {turns.length > 0 && (
-            <div className={styles.askBox}>
-              <div className={styles.askLabel}>
-                店員さんから質問・コメント（日本語で入力 → お客様の言語に翻訳して伝えます）
-              </div>
-              <div className={styles.customAskRow}>
-                <input
-                  value={staffAsk}
-                  onChange={(e) => setStaffAsk(e.target.value)}
-                  placeholder="例: ご予算はどのくらいですか？ / 季節のお花もおすすめできます"
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && staffAsk.trim()) {
-                      e.preventDefault();
-                      askInHearing();
-                    }
-                  }}
-                />
-                <button onClick={askInHearing} disabled={asking || !staffAsk.trim()}>
-                  {asking ? "..." : "お客様へ"}
-                </button>
-              </div>
+          <div className={styles.askBox}>
+            <div className={styles.askLabel}>
+              店員さんから質問・コメント（日本語で入力 → お客様の言語に翻訳して伝えます）
             </div>
-          )}
+            <div className={styles.customAskRow}>
+              <input
+                value={staffAsk}
+                onChange={(e) => setStaffAsk(e.target.value)}
+                placeholder="例: ご予算はどのくらいですか？ / 季節のお花もおすすめできます"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && staffAsk.trim()) {
+                    e.preventDefault();
+                    askInHearing();
+                  }
+                }}
+              />
+              <button onClick={askInHearing} disabled={asking || !staffAsk.trim()}>
+                {asking ? "..." : "お客様へ"}
+              </button>
+            </div>
+          </div>
 
           {brief && (
             <div className={styles.briefBox}>

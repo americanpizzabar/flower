@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./start.module.css";
 import { speechLangFor, type StoreIntroResult } from "@/lib/types";
-import { primeMic, speak, stopSpeaking, unlockSpeech } from "@/lib/speech";
+import { primeMic, speak, stopSpeaking } from "@/lib/speech";
 
 const STORAGE_INTRO = "hanakotoba.storeIntro";
 
@@ -273,8 +273,8 @@ export default function StartPage() {
   function pickLang(code: string) {
     // EVERYTHING here must run synchronously inside the user gesture. iOS
     // Safari refuses to start audio (TTS) or grant mic permission if we hop
-    // through a setTimeout / await first.
-    unlockSpeech(); // unlock TTS for the rest of the session
+    // through a setTimeout / await first. speak() queues its own near-silent
+    // lead-in so the engine's cold-start ramp doesn't clip the opening word.
     speak(introTextFor(code), speechLangFor(code)); // speak the intro NOW
     void primeMic(); // also surface the mic-permission prompt while we're in-gesture
     setLang(code);

@@ -165,3 +165,27 @@ const CONSULT_GUIDE: Record<string, string> = {
 export function consultGuide(lang: string): string {
   return CONSULT_GUIDE[lang] || CONSULT_GUIDE[lang.split("-")[0]] || CONSULT_GUIDE.en;
 }
+
+// Spoken + written usage guide for the "show flowers" screen, in the customer's
+// language. Explains that we'll hear their wish, then show real flowers and
+// generate a proposal image.
+const SHOW_GUIDE: Record<string, string> = {
+  ja: "ご希望のお花のイメージをお聞かせください。雰囲気・色・贈る相手・ご予算などをお話しいただければ、店内のお花で組み合わせの提案画像をお作りします。下の「話す」ボタンを押して話すか、入力欄に書いて送信してください。",
+  en: "Please tell us the flower arrangement you have in mind. Share the mood, colors, who it's for, and your budget, and we'll create a proposal image using our in-store flowers. Tap the “Speak” button and talk, or type in the box and send.",
+  "zh-Hans": "请告诉我们您心目中的花艺。说明氛围、颜色、送给谁、预算多少，我们就会用店内的鲜花为您制作搭配提案图。点击下方“说话”按钮讲话，或在输入框中输入后发送。",
+  "zh-Hant": "請告訴我們您心目中的花藝。說明氛圍、顏色、送給誰、預算多少，我們就會用店內的鮮花為您製作搭配提案圖。點擊下方「說話」按鈕講話，或在輸入框中輸入後傳送。",
+  ko: "원하시는 꽃 이미지를 알려주세요. 분위기, 색상, 받는 사람, 예산 등을 말씀해 주시면 매장의 꽃으로 조합 제안 이미지를 만들어 드립니다. 아래 “말하기” 버튼을 눌러 말씀하시거나 입력란에 적어 보내주세요.",
+  es: "Cuéntenos el arreglo floral que tiene en mente. Indique el ambiente, los colores, para quién es y su presupuesto, y crearemos una imagen de propuesta con nuestras flores. Pulse “Hablar” y hable, o escriba en el cuadro y envíe.",
+  fr: "Décrivez-nous la composition florale que vous imaginez. Précisez l'ambiance, les couleurs, pour qui et votre budget, et nous créerons une image de proposition avec nos fleurs. Appuyez sur « Parler » et parlez, ou écrivez et envoyez.",
+  de: "Beschreiben Sie uns das Blumengesteck, das Sie sich vorstellen. Nennen Sie Stimmung, Farben, für wen und Ihr Budget, und wir erstellen ein Vorschlagsbild mit unseren Blumen. Tippen Sie auf „Sprechen“ und sprechen Sie, oder schreiben und senden Sie.",
+  it: "Ci descriva la composizione floreale che immagina. Indichi atmosfera, colori, per chi è e il budget, e creeremo un'immagine di proposta con i nostri fiori. Tocchi “Parla” e parli, oppure scriva e invii.",
+  pt: "Descreva o arranjo floral que imagina. Diga o clima, as cores, para quem é e o seu orçamento, e criaremos uma imagem de proposta com as nossas flores. Toque em “Falar” e fale, ou escreva e envie.",
+  ru: "Опишите цветочную композицию, которую вы представляете. Укажите настроение, цвета, для кого и ваш бюджет, и мы создадим изображение-предложение из наших цветов. Нажмите «Говорить» и говорите или напишите и отправьте.",
+  th: "โปรดบอกภาพการจัดดอกไม้ที่คุณต้องการ บอกบรรยากาศ สี ให้ใคร และงบประมาณ แล้วเราจะสร้างภาพข้อเสนอด้วยดอกไม้ในร้าน กดปุ่ม “พูด” แล้วพูด หรือพิมพ์ในช่องแล้วส่ง",
+  vi: "Hãy mô tả mẫu hoa bạn hình dung. Cho biết không khí, màu sắc, tặng ai và ngân sách, chúng tôi sẽ tạo ảnh đề xuất bằng hoa trong cửa hàng. Nhấn nút “Nói” và nói, hoặc nhập vào ô rồi gửi.",
+  id: "Ceritakan rangkaian bunga yang Anda bayangkan. Sebutkan suasana, warna, untuk siapa, dan anggaran, lalu kami akan membuat gambar usulan dengan bunga di toko kami. Ketuk tombol “Bicara” lalu bicara, atau ketik di kotak dan kirim.",
+};
+
+export function showGuide(lang: string): string {
+  return SHOW_GUIDE[lang] || SHOW_GUIDE[lang.split("-")[0]] || SHOW_GUIDE.en;
+}
