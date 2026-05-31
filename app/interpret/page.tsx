@@ -141,11 +141,13 @@ export default function InterpretPage() {
             {staffSpeech.supported && (
               <button
                 className={`${styles.micButton} ${staffSpeech.listening ? styles.micActive : ""}`}
-                onClick={() => (staffSpeech.listening ? staffSpeech.stop() : staffSpeech.start())}
-                disabled={loading !== null}
+                onClick={staffSpeech.start}
+                disabled={loading !== null || staffSpeech.listening}
               >
-                <span className={styles.btnIcon}>{staffSpeech.listening ? "⏹" : "🎤"}</span>
-                <span className={styles.btnMain}>{staffSpeech.listening ? "停止" : "話す"}</span>
+                <span className={styles.btnIcon}>🎤</span>
+                <span className={styles.btnMain}>
+                  {staffSpeech.listening ? "聞いています…" : "話す"}
+                </span>
               </button>
             )}
             <button
@@ -174,20 +176,16 @@ export default function InterpretPage() {
             {customerSpeech.supported && (
               <button
                 className={`${styles.micButton} ${customerSpeech.listening ? styles.micActive : ""}`}
-                onClick={() =>
-                  customerSpeech.listening ? customerSpeech.stop() : customerSpeech.start()
-                }
-                disabled={loading !== null}
+                onClick={customerSpeech.start}
+                disabled={loading !== null || customerSpeech.listening}
               >
-                <span className={styles.btnIcon}>{customerSpeech.listening ? "⏹" : "🎤"}</span>
+                <span className={styles.btnIcon}>🎤</span>
                 <span className={styles.btnMain}>
-                  {customerSpeech.listening ? "停止" : "話す"}
+                  {customerSpeech.listening ? "聞いています…" : "話す"}
                 </span>
                 {customerLang !== "ja" && (
                   <span className={styles.btnSub}>
-                    {customerSpeech.listening
-                      ? uiLabel(customerLang, "stop")
-                      : uiLabel(customerLang, "speak")}
+                    {customerSpeech.listening ? "Listening…" : uiLabel(customerLang, "speak")}
                   </span>
                 )}
               </button>

@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import styles from "./start.module.css";
 import { speechLangFor, type StoreIntroResult } from "@/lib/types";
-import { primeMic, speak, stopSpeaking } from "@/lib/speech";
+import { primeMic, speak, stopSpeaking, unlockSpeech } from "@/lib/speech";
 
 const STORAGE_INTRO = "hanakotoba.storeIntro";
 
@@ -248,6 +248,11 @@ export default function StartPage() {
         /* ignore */
       }
     }
+    // iOS Safari loads the voice list asynchronously. Trigger a load so that
+    // by the time the user taps a language, getVoices() returns something.
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.getVoices();
+    }
     return () => stopSpeaking();
   }, []);
 
@@ -265,20 +270,16 @@ export default function StartPage() {
     return p.introFallback;
   }
 
-  async function pickLang(code: string) {
+  function pickLang(code: string) {
+    // EVERYTHING here must run synchronously inside the user gesture. iOS
+    // Safari refuses to start audio (TTS) or grant mic permission if we hop
+    // through a setTimeout / await first.
+    unlockSpeech(); // unlock TTS for the rest of the session
+    speak(introTextFor(code), speechLangFor(code)); // speak the intro NOW
+    void primeMic(); // also surface the mic-permission prompt while we're in-gesture
     setLang(code);
-    // User gesture → prime the shared mic now so later speech recognition on
-    // the consult/show screens starts warm (no dropped opening words).
-    void primeMic();
     setStage("intro");
-    spokenRef.current = false;
-    // Speak the intro shortly after the screen appears.
-    setTimeout(() => {
-      if (!spokenRef.current) {
-        spokenRef.current = true;
-        speak(introTextFor(code), speechLangFor(code));
-      }
-    }, 350);
+    spokenRef.current = true;
   }
 
   function replayIntro() {

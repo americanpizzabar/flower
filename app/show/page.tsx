@@ -356,14 +356,14 @@ export default function ShowPage() {
       {speech.supported && (
         <button
           className={`${styles.micButton} ${speech.listening ? styles.micActive : ""}`}
-          onClick={() => (speech.listening ? speech.stop() : speech.start())}
-          disabled={hearLoading}
+          onClick={speech.start}
+          disabled={hearLoading || speech.listening}
         >
-          <span className={styles.btnIcon}>{speech.listening ? "⏹" : "🎤"}</span>
-          <span className={styles.btnMain}>{speech.listening ? "停止" : "話す"}</span>
+          <span className={styles.btnIcon}>🎤</span>
+          <span className={styles.btnMain}>{speech.listening ? "聞いています…" : "話す"}</span>
           {lang !== "ja" && (
             <span className={styles.btnSub}>
-              {speech.listening ? uiLabel(lang, "stop") : uiLabel(lang, "speak")}
+              {speech.listening ? "Listening…" : uiLabel(lang, "speak")}
             </span>
           )}
         </button>

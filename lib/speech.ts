@@ -88,7 +88,6 @@ export function useSpeechRecognition(opts: {
   const finalTextRef = useRef("");
   const onFinalRef = useRef(opts.onFinal);
   const onErrorRef = useRef(opts.onError);
-  const stoppingRef = useRef(false);
 
   useEffect(() => {
     onFinalRef.current = opts.onFinal;
@@ -127,12 +126,11 @@ export function useSpeechRecognition(opts: {
     }
     const rec = new Ctor();
     rec.lang = opts.lang;
-    // Continuous keeps the session open until the user taps stop, so a short
-    // opening phrase is not cut off by the engine ending the session early.
-    rec.continuous = true;
+    // Auto-stop on silence so the user doesn't need a separate Stop button:
+    // speak → pause → engine ends → final text goes to onFinal.
+    rec.continuous = false;
     rec.interimResults = true;
     finalTextRef.current = "";
-    stoppingRef.current = false;
 
     rec.onresult = (e) => {
       let interimText = "";
@@ -148,23 +146,14 @@ export function useSpeechRecognition(opts: {
     };
 
     rec.onerror = (e) => {
+      setListening(false);
+      setInterim("");
       if (e.error && e.error !== "no-speech" && e.error !== "aborted") {
         onErrorRef.current?.(e.error);
       }
     };
 
     rec.onend = () => {
-      // In continuous mode some browsers end the session on a long silence even
-      // though the user hasn't tapped stop. Restart transparently so we keep
-      // listening; only emit the final text once the user actually stops.
-      if (!stoppingRef.current && recRef.current === rec) {
-        try {
-          rec.start();
-          return;
-        } catch {
-          /* fall through to finalize */
-        }
-      }
       setListening(false);
       setInterim("");
       const finalText = finalTextRef.current.trim();
@@ -183,27 +172,14 @@ export function useSpeechRecognition(opts: {
   }, [opts.lang]);
 
   const start = useCallback(() => {
-    // Make sure the shared mic is warm before starting recognition. If the
-    // welcome flow already primed it this resolves instantly; otherwise it
-    // surfaces the permission prompt and warms the mic so the first utterance
-    // is captured.
-    if (isMicPrimed() || !navigator.mediaDevices?.getUserMedia) {
-      beginRecognition();
-      return;
-    }
-    setListening(true);
-    primeMic().then((ok) => {
-      if (ok) {
-        beginRecognition();
-      } else {
-        setListening(false);
-        onErrorRef.current?.("mic permission denied");
-      }
-    });
+    // Must run synchronously inside the user gesture — on iOS Safari any async
+    // hop (await, .then, setTimeout) drops the gesture and the engine refuses
+    // to listen. SR has its own internal audio capture so we don't need to
+    // await getUserMedia here.
+    beginRecognition();
   }, [beginRecognition]);
 
   const stop = useCallback(() => {
-    stoppingRef.current = true;
     try {
       recRef.current?.stop();
     } catch {
@@ -214,16 +190,54 @@ export function useSpeechRecognition(opts: {
   return { listening, interim, supported, start, stop };
 }
 
-export function speak(text: string, lang: string) {
-  if (typeof window === "undefined") return;
+// Unlock speechSynthesis on iOS by speaking an empty utterance inside a user
+// gesture. Subsequent speak() calls (even later, not in a gesture) then work.
+// Safe to call repeatedly; only the first call has any effect.
+let synthUnlocked = false;
+export function unlockSpeech() {
+  if (typeof window === "undefined" || synthUnlocked) return;
   const synth = window.speechSynthesis;
   if (!synth) return;
-  synth.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.lang = lang;
-  u.rate = 1.0;
-  u.pitch = 1.0;
-  synth.speak(u);
+  try {
+    const u = new SpeechSynthesisUtterance(" ");
+    u.volume = 0;
+    synth.speak(u);
+    synthUnlocked = true;
+  } catch {
+    /* ignore */
+  }
+}
+
+export function speak(text: string, lang: string) {
+  if (typeof window === "undefined" || !text) return;
+  const synth = window.speechSynthesis;
+  if (!synth) return;
+  // Stop anything currently being said. The tiny rAF gap before speaking avoids
+  // an iOS quirk where cancel()+speak() back-to-back swallows the new utterance.
+  try {
+    synth.cancel();
+  } catch {
+    /* ignore */
+  }
+  const run = () => {
+    const u = new SpeechSynthesisUtterance(text);
+    u.lang = lang;
+    u.rate = 1.0;
+    u.pitch = 1.0;
+    // Pick an explicit matching voice when available — iOS sometimes fails to
+    // auto-select one for `u.lang` and stays silent.
+    const voices = synth.getVoices?.() || [];
+    if (voices.length > 0) {
+      const base = lang.split("-")[0];
+      const match =
+        voices.find((v) => v.lang === lang) ||
+        voices.find((v) => v.lang.toLowerCase().startsWith(base.toLowerCase()));
+      if (match) u.voice = match;
+    }
+    synth.speak(u);
+  };
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
+  else setTimeout(run, 0);
 }
 
 export function stopSpeaking() {
