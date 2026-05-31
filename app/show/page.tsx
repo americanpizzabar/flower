@@ -12,7 +12,7 @@ import {
 } from "@/lib/types";
 import { useSpeechRecognition, speak } from "@/lib/speech";
 import {
-  captureVideoFrame,
+  captureVideoFrames,
   compressImage,
   isInAppCameraSupported,
   MAX_VIDEO_SECONDS,
@@ -260,15 +260,20 @@ export default function ShowPage() {
     setError("");
     camera.close();
     try {
-      // Photos go in directly; videos contribute a representative still frame
-      // so the flowers shown in the video are honored in the generation input.
+      // Photos go in directly. Videos contribute SEVERAL evenly-spaced frames
+      // (not just one mid-point still): a single frame missed flowers that only
+      // appeared elsewhere in the clip, so the AI's whitelist was incomplete and
+      // it invented flowers that were never filmed. More frames = the identify
+      // step sees everything actually in the video.
       const photoFiles: File[] = media.filter((m) => m.kind === "image").map((m) => m.file);
       const videoMedia = media.filter((m) => m.kind === "video");
       for (const v of videoMedia) {
         try {
-          const frame = await captureVideoFrame(v.file);
-          const compressed = await compressImage(frame).catch(() => frame);
-          photoFiles.push(compressed);
+          const frames = await captureVideoFrames(v.file, 5);
+          for (const frame of frames) {
+            const compressed = await compressImage(frame).catch(() => frame);
+            photoFiles.push(compressed);
+          }
         } catch {
           /* skip frames we can't extract */
         }
@@ -277,16 +282,30 @@ export default function ShowPage() {
         throw new Error("写真または動画から花の画像を取得できませんでした。");
       }
 
-      const totalMb = photoFiles.reduce((s, f) => s + f.size, 0) / (1024 * 1024);
-      if (totalMb > 4) {
-        throw new Error(
-          `画像の合計サイズが ${totalMb.toFixed(1)}MB です。上限 (4MB) を超えるため枚数を減らしてください。`,
-        );
+      // Keep user photos; if the auto-extracted video frames push us over the
+      // 4MB upload limit, drop the extra frames (from the end) rather than
+      // erroring — the user can't "reduce" frames they didn't add manually.
+      const LIMIT = 4 * 1024 * 1024;
+      const sending: File[] = [];
+      let running = 0;
+      let droppedFrames = 0;
+      for (const f of photoFiles) {
+        if (running + f.size <= LIMIT || sending.length === 0) {
+          sending.push(f);
+          running += f.size;
+        } else {
+          droppedFrames += 1;
+        }
+      }
+      if (droppedFrames > 0) {
+        // Best-effort: keep going with what fits. The identify step still sees
+        // several frames, which is the point of multi-frame sampling.
+        console.warn(`Dropped ${droppedFrames} frame(s) to stay under the 4MB limit.`);
       }
       const form = new FormData();
       form.append("brief", briefText());
       form.append("lang", lang);
-      photoFiles.forEach((f) => form.append("media", f));
+      sending.forEach((f) => form.append("media", f));
       const res = await fetch("/api/visual/generate", { method: "POST", body: form });
 
       if (res.status === 413) {

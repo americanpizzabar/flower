@@ -377,6 +377,110 @@ export function captureVideoFrame(file: File): Promise<File> {
   });
 }
 
+/**
+ * Extract several evenly-spaced still frames from a video. A single mid-point
+ * frame often misses flowers that only appear elsewhere in the clip (or lands
+ * on a blurry/empty frame), which left the identification step with a poor
+ * whitelist and let the generator invent flowers that were never filmed.
+ * Sampling across the whole clip gives identification a complete picture.
+ *
+ * Returns up to `count` JPEG frames (skipping any that fail to render).
+ */
+export function captureVideoFrames(file: File, count = 4): Promise<File[]> {
+  return new Promise((resolve) => {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement("video");
+    v.src = url;
+    v.muted = true;
+    v.playsInline = true;
+    v.preload = "auto";
+
+    const frames: File[] = [];
+    let targets: number[] = [];
+    let idx = 0;
+    let settled = false;
+
+    const cleanup = () => URL.revokeObjectURL(url);
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve(frames);
+    };
+    // Don't hang forever on a flaky decode.
+    const guard = setTimeout(finish, 15000);
+    const done = () => {
+      clearTimeout(guard);
+      finish();
+    };
+
+    const seekNext = () => {
+      if (idx >= targets.length) {
+        done();
+        return;
+      }
+      try {
+        v.currentTime = targets[idx];
+      } catch {
+        done();
+      }
+    };
+
+    v.onloadedmetadata = () => {
+      const dur = v.duration && isFinite(v.duration) ? v.duration : 0;
+      const n = Math.max(1, count);
+      if (dur > 0) {
+        // Sample at 1/(n+1), 2/(n+1), ... of the duration — spread across the
+        // clip while avoiding the very first/last (often blurry) frames.
+        targets = Array.from({ length: n }, (_, i) => (dur * (i + 1)) / (n + 1));
+      } else {
+        targets = [0];
+      }
+      const startSeek = () => seekNext();
+      if (v.readyState >= 2) startSeek();
+      else v.oncanplay = startSeek;
+    };
+
+    v.onseeked = () => {
+      const w = v.videoWidth || 1280;
+      const h = v.videoHeight || 720;
+      const canvas = document.createElement("canvas");
+      canvas.width = w;
+      canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(v, 0, 0, w, h);
+        const blob = canvasToBlobSync(canvas);
+        if (blob) {
+          frames.push(
+            new File([blob], `frame-${Date.now()}-${idx}.jpg`, { type: "image/jpeg" }),
+          );
+        }
+      }
+      idx += 1;
+      seekNext();
+    };
+
+    v.onerror = () => done();
+  });
+}
+
+// Synchronous-ish toDataURL → Blob (canvas.toBlob is async and would race the
+// next seek; toDataURL returns immediately).
+function canvasToBlobSync(canvas: HTMLCanvasElement): Blob | null {
+  try {
+    const dataUrl = canvas.toDataURL("image/jpeg", 0.85);
+    const comma = dataUrl.indexOf(",");
+    if (comma === -1) return null;
+    const binary = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    return new Blob([bytes], { type: "image/jpeg" });
+  } catch {
+    return null;
+  }
+}
+
 export function videoDuration(file: File): Promise<number> {
   return new Promise((resolve, reject) => {
     const url = URL.createObjectURL(file);
