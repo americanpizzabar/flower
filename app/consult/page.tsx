@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import styles from "./consult.module.css";
 import {
+  consultGuide,
   CONSULT_SLOTS,
   type ConsultKeywords,
   type ConsultResult,
@@ -21,10 +22,15 @@ interface ChatTurn {
 
 export default function ConsultPage() {
   const [lang, setLang] = useState("en");
-  // When the customer arrived from the welcome flow (/start), honor ?lang=.
+  // Whether the customer arrived from the welcome flow (/start) with a chosen
+  // language; if so we greet them and read the usage guide aloud automatically.
+  const [fromStart, setFromStart] = useState(false);
   useEffect(() => {
     const q = new URLSearchParams(window.location.search).get("lang");
-    if (q && SUPPORTED_LANGS.some((l) => l.code === q)) setLang(q);
+    if (q && SUPPORTED_LANGS.some((l) => l.code === q)) {
+      setLang(q);
+      setFromStart(true);
+    }
   }, []);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
@@ -35,8 +41,18 @@ export default function ConsultPage() {
   const [error, setError] = useState("");
   const [autoSpeak, setAutoSpeak] = useState(true);
   const historyEndRef = useRef<HTMLDivElement>(null);
+  const guideSpokenRef = useRef(false);
 
   const speechLang = SUPPORTED_LANGS.find((l) => l.code === lang)?.speech || "en-US";
+
+  // Speak the usage guide once, in the customer's language, when they arrive
+  // from the welcome flow. speechSynthesis was already unlocked there.
+  useEffect(() => {
+    if (fromStart && !guideSpokenRef.current) {
+      guideSpokenRef.current = true;
+      speak(consultGuide(lang), speechLang);
+    }
+  }, [fromStart, lang, speechLang]);
   const speech = useSpeechRecognition({
     lang: speechLang,
     onFinal: (t) => setInput((prev) => (prev ? `${prev} ${t}` : t)),
@@ -137,7 +153,6 @@ export default function ConsultPage() {
 
   const filled = new Set<SlotKey>(state?.filled_slots || []);
   const isReady = state?.is_ready === true;
-  const conversationStarted = turns.length > 0;
 
   return (
     <div>
@@ -146,6 +161,17 @@ export default function ConsultPage() {
         お客様と AI が会話しながら必要な情報を集めます。店員さんが聞きたい項目を選んだり、
         自由に質問を入力することもできます。
       </p>
+
+      {/* Customer-facing usage guide, in their own language (spoken + written). */}
+      <div className={styles.guideBox}>
+        <p className={styles.guideText}>{consultGuide(lang)}</p>
+        <button
+          className={styles.guideSpeak}
+          onClick={() => speak(consultGuide(lang), speechLang)}
+        >
+          🔊 {uiLabel(lang, "speak")}
+        </button>
+      </div>
 
       {turns.length === 0 && (
         <div className={styles.langPickerBox}>
@@ -232,44 +258,42 @@ export default function ConsultPage() {
 
       {error && <p className={styles.error}>{error}</p>}
 
-      {/* Staff-driven question controls */}
-      {conversationStarted && (
-        <div className={styles.askBox}>
-          <div className={styles.askLabel}>店員さんから聞く（お客様の言語に翻訳して質問します）</div>
-          <div className={styles.slotChips}>
-            {CONSULT_SLOTS.map((s) => (
-              <button
-                key={s.key}
-                className={styles.chip}
-                disabled={asking || loading}
-                onClick={() => ask("slot", s.key)}
-              >
-                {filled.has(s.key) ? "🔁 " : "＋ "}
-                {s.label_ja}
-              </button>
-            ))}
-          </div>
-          <div className={styles.customAskRow}>
-            <input
-              value={customQ}
-              onChange={(e) => setCustomQ(e.target.value)}
-              placeholder="自由に質問を入力（日本語）例: アレルギーのあるお花はありますか？"
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && customQ.trim()) {
-                  e.preventDefault();
-                  ask("custom", undefined, customQ.trim());
-                }
-              }}
-            />
+      {/* Staff-driven question controls (always available to staff) */}
+      <div className={styles.askBox}>
+        <div className={styles.askLabel}>店員さんから聞く（日本語で入力 → お客様の言語に翻訳して質問します）</div>
+        <div className={styles.slotChips}>
+          {CONSULT_SLOTS.map((s) => (
             <button
-              disabled={asking || loading || !customQ.trim()}
-              onClick={() => ask("custom", undefined, customQ.trim())}
+              key={s.key}
+              className={styles.chip}
+              disabled={asking || loading}
+              onClick={() => ask("slot", s.key)}
             >
-              {asking ? "..." : "質問する"}
+              {filled.has(s.key) ? "🔁 " : "＋ "}
+              {s.label_ja}
             </button>
-          </div>
+          ))}
         </div>
-      )}
+        <div className={styles.customAskRow}>
+          <input
+            value={customQ}
+            onChange={(e) => setCustomQ(e.target.value)}
+            placeholder="自由に質問を入力（日本語）例: アレルギーのあるお花はありますか？"
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && customQ.trim()) {
+                e.preventDefault();
+                ask("custom", undefined, customQ.trim());
+              }
+            }}
+          />
+          <button
+            disabled={asking || loading || !customQ.trim()}
+            onClick={() => ask("custom", undefined, customQ.trim())}
+          >
+            {asking ? "..." : "質問する"}
+          </button>
+        </div>
+      </div>
 
       {/* Customer input */}
       <div className={styles.composer}>

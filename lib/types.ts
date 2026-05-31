@@ -141,3 +141,27 @@ export function uiLabel(lang: string, key: UiKey): string {
   const table = UI_LABELS[lang] || UI_LABELS[lang.split("-")[0]] || UI_LABELS.en;
   return table[key];
 }
+
+// Spoken + written usage guide shown to the customer when the consult screen
+// opens, in their own language. Encourages them to describe what they want by
+// voice (🎤) or text.
+const CONSULT_GUIDE: Record<string, string> = {
+  ja: "ご希望のお花についてお聞かせください。「誰に」「どんな場面で」「ご予算」などをお話しいただければ、ぴったりのお花をご提案します。下の「話す」ボタンを押して話すか、入力欄に書いて送信してください。",
+  en: "Please tell us about the flowers you'd like. Share who they're for, the occasion, and your budget, and we'll suggest the perfect flowers. Tap the “Speak” button and talk, or type in the box and send.",
+  "zh-Hans": "请告诉我们您想要的鲜花。说明送给谁、什么场合、预算多少，我们就会为您推荐最合适的鲜花。点击下方“说话”按钮讲话，或在输入框中输入后发送。",
+  "zh-Hant": "請告訴我們您想要的鮮花。說明送給誰、什麼場合、預算多少，我們就會為您推薦最合適的鮮花。點擊下方「說話」按鈕講話，或在輸入框中輸入後傳送。",
+  ko: "원하시는 꽃에 대해 알려주세요. 누구에게, 어떤 상황에, 예산은 어느 정도인지 말씀해 주시면 알맞은 꽃을 추천해 드립니다. 아래 “말하기” 버튼을 눌러 말씀하시거나 입력란에 적어 보내주세요.",
+  es: "Cuéntenos qué flores desea. Indíquenos para quién son, la ocasión y su presupuesto, y le sugeriremos las flores ideales. Pulse el botón “Hablar” y hable, o escriba en el cuadro y envíe.",
+  fr: "Dites-nous quelles fleurs vous souhaitez. Précisez pour qui, l'occasion et votre budget, et nous vous proposerons les fleurs idéales. Appuyez sur le bouton « Parler » et parlez, ou écrivez dans le champ et envoyez.",
+  de: "Sagen Sie uns, welche Blumen Sie möchten. Nennen Sie für wen, den Anlass und Ihr Budget, und wir schlagen die passenden Blumen vor. Tippen Sie auf „Sprechen“ und sprechen Sie, oder schreiben Sie ins Feld und senden Sie.",
+  it: "Ci dica quali fiori desidera. Indichi per chi sono, l'occasione e il suo budget, e le suggeriremo i fiori ideali. Tocchi il pulsante “Parla” e parli, oppure scriva nel riquadro e invii.",
+  pt: "Conte-nos quais flores deseja. Diga para quem são, a ocasião e o seu orçamento, e sugeriremos as flores ideais. Toque no botão “Falar” e fale, ou escreva na caixa e envie.",
+  ru: "Расскажите, какие цветы вы хотите. Укажите, для кого они, по какому случаю и ваш бюджет, и мы предложим идеальные цветы. Нажмите кнопку «Говорить» и говорите или напишите в поле и отправьте.",
+  th: "โปรดบอกเราเกี่ยวกับดอกไม้ที่คุณต้องการ บอกว่าให้ใคร โอกาสใด และงบประมาณเท่าไร แล้วเราจะแนะนำดอกไม้ที่เหมาะที่สุด กดปุ่ม “พูด” แล้วพูด หรือพิมพ์ในช่องแล้วส่ง",
+  vi: "Hãy cho chúng tôi biết về loài hoa bạn muốn. Cho biết tặng ai, dịp nào và ngân sách của bạn, chúng tôi sẽ gợi ý loài hoa phù hợp nhất. Nhấn nút “Nói” và nói, hoặc nhập vào ô rồi gửi.",
+  id: "Ceritakan bunga yang Anda inginkan. Sebutkan untuk siapa, acaranya, dan anggaran Anda, lalu kami akan menyarankan bunga yang paling cocok. Ketuk tombol “Bicara” lalu bicara, atau ketik di kotak dan kirim.",
+};
+
+export function consultGuide(lang: string): string {
+  return CONSULT_GUIDE[lang] || CONSULT_GUIDE[lang.split("-")[0]] || CONSULT_GUIDE.en;
+}

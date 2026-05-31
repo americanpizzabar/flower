@@ -293,17 +293,34 @@ export async function generateProposalImage(
     throw translateSdkError(e);
   }
 
-  const candidate = (
-    res as unknown as {
-      candidates?: { content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] } }[];
-    }
-  ).candidates?.[0];
+  const full = res as unknown as {
+    candidates?: {
+      finishReason?: string;
+      content?: { parts?: { text?: string; inlineData?: { data?: string; mimeType?: string } }[] };
+    }[];
+    promptFeedback?: { blockReason?: string };
+  };
+  const candidate = full.candidates?.[0];
   const imagePart = candidate?.content?.parts?.find((p) => p.inlineData?.data);
   if (!imagePart?.inlineData?.data) {
-    throw new AiError(
-      `画像を生成できませんでした。モデル「${IMAGE_MODEL}」が画像生成に対応しているか、API キーの権限をご確認ください。`,
-      { code: "no_image" },
-    );
+    // Surface the real reason instead of a generic message so we can tell a
+    // wrong model name from a safety block or a text-only response.
+    const block = full.promptFeedback?.blockReason;
+    const finish = candidate?.finishReason;
+    const textBack = candidate?.content?.parts
+      ?.map((p) => p.text)
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 200);
+    let detail = "";
+    if (block) detail = `生成がブロックされました (理由: ${block})。`;
+    else if (finish && finish !== "STOP")
+      detail = `生成が途中で終了しました (finishReason: ${finish})。`;
+    else if (textBack)
+      detail = `モデルが画像の代わりにテキストを返しました: ${textBack}`;
+    else
+      detail = `モデル「${IMAGE_MODEL}」が画像生成に対応しているか、API キーの権限をご確認ください。`;
+    throw new AiError(`画像を生成できませんでした。${detail}`, { code: "no_image" });
   }
   return {
     base64: imagePart.inlineData.data,
