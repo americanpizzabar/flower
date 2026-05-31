@@ -16,6 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             <Link href="/" className="brand">
               🌸 Hanakotoba
             </Link>
+            <Link href="/start">お客様に渡す</Link>
             <Link href="/consult">イメージで提案</Link>
             <Link href="/show">花を見せる</Link>
             <Link href="/interpret">通訳</Link>

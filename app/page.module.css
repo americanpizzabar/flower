@@ -9,6 +9,41 @@
   margin-bottom: 32px;
 }
 
+.handoff {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--accent-light);
+  border: 2px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 22px 24px;
+  margin-bottom: 24px;
+  text-decoration: none !important;
+  color: var(--fg) !important;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.handoff:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.08);
+}
+
+.handoffEmoji {
+  font-size: 2.8rem;
+  flex-shrink: 0;
+}
+
+.handoff h2 {
+  margin: 0 0 6px;
+  color: var(--accent-dark);
+}
+
+.handoff p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
 .cards {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));

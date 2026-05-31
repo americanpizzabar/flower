@@ -42,6 +42,17 @@ export default function HomePage() {
         4つの営業ツールと使い方マニュアルで、世界中のお客様と花でつながります。
       </p>
 
+      <Link href="/start" className={styles.handoff}>
+        <div className={styles.handoffEmoji}>👋</div>
+        <div>
+          <h2>お客様にお渡しする</h2>
+          <p>
+            言語を選んでもらい、店舗紹介のあと「相談」か「お花を見せる」へご案内します。
+            まずはこの画面をお客様に渡してください。
+          </p>
+        </div>
+      </Link>
+
       <div className={styles.cards}>
         {TOOLS.map((t) => (
           <Link key={t.href} href={t.href} className={styles.card}>

@@ -21,6 +21,11 @@ interface ChatTurn {
 
 export default function ConsultPage() {
   const [lang, setLang] = useState("en");
+  // When the customer arrived from the welcome flow (/start), honor ?lang=.
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get("lang");
+    if (q && SUPPORTED_LANGS.some((l) => l.code === q)) setLang(q);
+  }, []);
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState("");
   const [customQ, setCustomQ] = useState("");
