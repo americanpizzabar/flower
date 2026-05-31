@@ -212,32 +212,35 @@ export function speak(text: string, lang: string) {
   if (typeof window === "undefined" || !text) return;
   const synth = window.speechSynthesis;
   if (!synth) return;
-  // Stop anything currently being said. The tiny rAF gap before speaking avoids
-  // an iOS quirk where cancel()+speak() back-to-back swallows the new utterance.
+  // Must run synchronously: Chrome on Android (and iOS Safari) only start audio
+  // when speak() is called inside the user gesture. Deferring via rAF/setTimeout
+  // drops the gesture and the utterance stays silent.
   try {
     synth.cancel();
   } catch {
     /* ignore */
   }
-  const run = () => {
-    const u = new SpeechSynthesisUtterance(text);
-    u.lang = lang;
-    u.rate = 1.0;
-    u.pitch = 1.0;
-    // Pick an explicit matching voice when available — iOS sometimes fails to
-    // auto-select one for `u.lang` and stays silent.
-    const voices = synth.getVoices?.() || [];
-    if (voices.length > 0) {
-      const base = lang.split("-")[0];
-      const match =
-        voices.find((v) => v.lang === lang) ||
-        voices.find((v) => v.lang.toLowerCase().startsWith(base.toLowerCase()));
-      if (match) u.voice = match;
-    }
-    synth.speak(u);
-  };
-  if (typeof requestAnimationFrame === "function") requestAnimationFrame(run);
-  else setTimeout(run, 0);
+  const u = new SpeechSynthesisUtterance(text);
+  u.lang = lang;
+  u.rate = 1.0;
+  u.pitch = 1.0;
+  // Pick an explicit matching voice when one is available — some browsers fail
+  // to auto-select a voice for the requested lang and stay silent otherwise.
+  const voices = synth.getVoices?.() || [];
+  if (voices.length > 0) {
+    const base = lang.split("-")[0].toLowerCase();
+    const match =
+      voices.find((v) => v.lang === lang) ||
+      voices.find((v) => v.lang.toLowerCase().startsWith(base));
+    if (match) u.voice = match;
+  }
+  synth.speak(u);
+  // Chrome can get stuck in a paused state after cancel(); nudge it back.
+  try {
+    synth.resume();
+  } catch {
+    /* ignore */
+  }
 }
 
 export function stopSpeaking() {
