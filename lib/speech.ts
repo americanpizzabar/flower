@@ -47,33 +47,25 @@ function getRecognitionCtor(): SRCtor | null {
   return w.SpeechRecognition || w.webkitSpeechRecognition || null;
 }
 
-// A microphone stream shared across the whole app (module scope survives client
-// navigations). The welcome flow primes it up front via primeMic(); every later
-// SpeechRecognition session then reuses an already-warm mic, so the engine never
-// has to cold-start and the opening words are not dropped.
-let sharedMicStream: MediaStream | null = null;
-
 /**
- * Acquire (and keep) the microphone so later speech recognition starts warm.
- * Safe to call repeatedly — it reuses the existing stream. Best called from a
- * user gesture (e.g. a button on the welcome screen) so the permission prompt
- * appears at a natural moment.
+ * Surface the microphone-permission prompt up front (e.g. from a button on the
+ * welcome screen) so it appears at a natural moment.
+ *
+ * IMPORTANT: we must NOT keep the stream open. On Android Chrome the
+ * SpeechRecognition engine needs exclusive access to the microphone; if a
+ * getUserMedia stream is still holding it, recognition receives no audio and
+ * silently transcribes nothing. So we request the mic only to trigger/cache the
+ * permission, then immediately stop every track to release it.
  */
 export async function primeMic(): Promise<boolean> {
   if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) return false;
-  if (sharedMicStream && sharedMicStream.getTracks().some((t) => t.readyState === "live")) {
-    return true;
-  }
   try {
-    sharedMicStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    stream.getTracks().forEach((t) => t.stop());
     return true;
   } catch {
     return false;
   }
-}
-
-export function isMicPrimed(): boolean {
-  return !!sharedMicStream && sharedMicStream.getTracks().some((t) => t.readyState === "live");
 }
 
 export function useSpeechRecognition(opts: {
@@ -105,12 +97,14 @@ export function useSpeechRecognition(opts: {
       } catch {
         /* ignore */
       }
-      // The mic stream is shared app-wide (see primeMic); leave it running so
-      // navigating between pages keeps the mic warm.
     };
   }, []);
 
-  const beginRecognition = useCallback(() => {
+  const start = useCallback(() => {
+    // Must run synchronously inside the user gesture — any async hop (await,
+    // .then, setTimeout) before .start() drops the gesture and the engine
+    // refuses to listen. SpeechRecognition manages its own microphone capture,
+    // so we do NOT open a getUserMedia stream here (that would steal the mic).
     if (recRef.current) {
       try {
         recRef.current.abort();
@@ -126,8 +120,8 @@ export function useSpeechRecognition(opts: {
     }
     const rec = new Ctor();
     rec.lang = opts.lang;
-    // Auto-stop on silence so the user doesn't need a separate Stop button:
-    // speak → pause → engine ends → final text goes to onFinal.
+    // Auto-stop on silence so no separate Stop button is needed:
+    // tap 🎤 → speak → pause → engine ends → final text goes to onFinal.
     rec.continuous = false;
     rec.interimResults = true;
     finalTextRef.current = "";
@@ -171,14 +165,6 @@ export function useSpeechRecognition(opts: {
     }
   }, [opts.lang]);
 
-  const start = useCallback(() => {
-    // Must run synchronously inside the user gesture — on iOS Safari any async
-    // hop (await, .then, setTimeout) drops the gesture and the engine refuses
-    // to listen. SR has its own internal audio capture so we don't need to
-    // await getUserMedia here.
-    beginRecognition();
-  }, [beginRecognition]);
-
   const stop = useCallback(() => {
     try {
       recRef.current?.stop();
@@ -190,9 +176,8 @@ export function useSpeechRecognition(opts: {
   return { listening, interim, supported, start, stop };
 }
 
-// Unlock speechSynthesis on iOS by speaking an empty utterance inside a user
-// gesture. Subsequent speak() calls (even later, not in a gesture) then work.
-// Safe to call repeatedly; only the first call has any effect.
+// Unlock speechSynthesis on first user gesture (mainly for iOS Safari) by
+// speaking a silent utterance. Subsequent speak() calls then work.
 let synthUnlocked = false;
 export function unlockSpeech() {
   if (typeof window === "undefined" || synthUnlocked) return;
